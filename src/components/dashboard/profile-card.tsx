@@ -19,7 +19,7 @@ function formatMemberSince(unixSeconds: number): string {
  */
 export function ProfileCard({ profile }: { profile: PlatformIdentity }) {
   return (
-    <Card className="flex flex-col gap-6 p-7 sm:flex-row sm:items-start">
+    <Card className="flex h-full flex-col gap-6 p-7 sm:flex-row sm:items-center">
       <PlatformAvatar
         src={profile.avatarUrl}
         handle={profile.handle}

@@ -128,7 +128,7 @@ export function ActivityHeatmap({
           </div>
         ) : (
           <div
-            className="relative w-max"
+            className="relative mx-auto w-max"
             style={{ paddingLeft: 30, paddingTop: 16 }}
           >
             {/* Month labels */}

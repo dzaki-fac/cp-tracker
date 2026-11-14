@@ -63,7 +63,7 @@ export function RatingTrendCard({ history }: { history: RatingHistoryPoint[] }) 
   const max = data.length ? Math.max(...data.map((d) => d.rating)) : 0;
 
   return (
-    <Card className="flex flex-col gap-5 p-7">
+    <Card className="flex h-full flex-col gap-5 p-7">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <LineChartIcon className="size-4 text-steel" aria-hidden />
@@ -72,7 +72,7 @@ export function RatingTrendCard({ history }: { history: RatingHistoryPoint[] }) 
         <CardDescription>Rated contests over time</CardDescription>
       </CardHeader>
 
-      <div className="h-[168px] w-full">
+      <div className="min-h-[168px] w-full flex-1">
         {data.length < 2 ? (
           <div className="flex h-full items-center justify-center text-[14px] text-steel">
             {data.length === 0
