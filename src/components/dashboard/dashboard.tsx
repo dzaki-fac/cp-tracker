@@ -15,6 +15,11 @@ import { SolvedProblemsTable } from "@/components/problems/solved-problems-table
  * Server component: fetches the normalized dashboard payload and composes
  * the presentation sections. All platform-specific logic stays behind
  * `lib/codeforces` — the sections below consume generic domain types.
+ *
+ * Layout: white bands for the identity/overview chapters, then a full-bleed
+ * Studio Mist band for the insights chapter (charts + table), per DESIGN.md.
+ * Each section manages its own centered container so backgrounds can span
+ * the full viewport width on large screens.
  */
 export default async function Dashboard() {
   let data;
@@ -31,40 +36,38 @@ export default async function Dashboard() {
   const { profile, stale } = data;
 
   return (
-    <div className="flex flex-col gap-10">
-      {/* Profile band */}
+    <div>
+      {/* Identity & overview band — gallery white */}
       <section
-        aria-label="Profile"
-        className="flex flex-col gap-3"
+        aria-label="Profile and overview"
+        className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-5 py-10 sm:px-6 lg:px-10 lg:py-14"
       >
-        <FreshnessBar ageMs={ageMs} stale={stale} />
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-          <div className="lg:col-span-2">
-            <ProfileCard profile={profile} />
+        <div className="flex flex-col gap-3">
+          <FreshnessBar ageMs={ageMs} stale={stale} />
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+              <ProfileCard profile={profile} />
+            </div>
+            <RatingTrendCard history={data.ratingHistory} />
           </div>
-          <RatingTrendCard history={data.ratingHistory} />
         </div>
+
+        <section aria-label="Overview statistics">
+          <StatsGrid data={data} />
+        </section>
       </section>
 
-      {/* Overview statistics */}
-      <section aria-label="Overview statistics">
-        <StatsGrid data={data} />
-      </section>
-
-      {/* Insights band — alternate studio-mist section */}
-      <section
-        aria-label="Insights"
-        className="-mx-5 -my-6 bg-studio-mist px-5 py-12 sm:-mx-6 sm:px-6 lg:-mx-10 lg:px-10"
-      >
-        <div className="mx-auto flex max-w-6xl flex-col gap-5">
+      {/* Insights band — full-bleed Studio Mist */}
+      <section aria-label="Insights" className="w-full bg-studio-mist">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-5 py-12 sm:px-6 lg:px-10">
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
             <RatingDistributionChart
               buckets={data.ratingDistribution}
               unrated={data.unratedSolved}
             />
-            <ActivityHeatmap days={data.activity} total={data.activityTotal} />
+            <CumulativeProgressChart series={data.cumulative} />
           </div>
-          <CumulativeProgressChart series={data.cumulative} />
+          <ActivityHeatmap days={data.activity} total={data.activityTotal} />
           <SolvedProblemsTable problems={data.solvedProblems} />
         </div>
       </section>

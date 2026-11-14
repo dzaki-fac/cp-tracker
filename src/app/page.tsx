@@ -14,7 +14,7 @@ export default function Home() {
   return (
     <div className="flex min-h-screen flex-col bg-gallery-white">
       <SiteHeader />
-      <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-10 sm:px-6 lg:px-10 lg:py-14">
+      <main className="flex-1">
         <Suspense fallback={<DashboardSkeleton />}>
           <Dashboard />
         </Suspense>
