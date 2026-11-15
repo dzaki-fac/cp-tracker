@@ -2,25 +2,25 @@ import { CodeforcesApiError } from "@/lib/codeforces/api";
 import { getDashboardData } from "@/lib/dashboard";
 
 import { ActivityCalendar } from "@/components/charts/activity-calendar";
+import { ActivityHeatmap } from "@/components/charts/activity-heatmap";
 import { CumulativeProgressChart } from "@/components/charts/cumulative-progress-chart";
-import { RatingTrendCard } from "@/components/charts/rating-trend-card";
 import { WeeklyPerformanceChart } from "@/components/charts/weekly-performance-chart";
-import { AllTimeStats } from "@/components/dashboard/all-time-stats";
 import { DashboardError } from "@/components/dashboard/dashboard-error";
 import { FreshnessBar } from "@/components/dashboard/freshness-bar";
-import { PracticeSection } from "@/components/dashboard/practice-section";
+import { LowerSections } from "@/components/dashboard/practice-section";
 import { ProfileCard } from "@/components/dashboard/profile-card";
 import { RecentOverview } from "@/components/dashboard/recent-overview";
 
 /**
  * Server component: fetches the normalized dashboard payload and composes
- * the redesigned training-tracker layout, in this exact order:
+ * the redesigned training-tracker layout:
  *
  *   1. Profile header (compact)      6. Difficulty progress
  *   2. Recent activity overview      7. Topic breakdown
- *   3. Monthly activity calendar     8. Recent solved problems
- *   4. Weekly performance            9. All-time statistics
- *   5. Problem solving progress     10. Rating progression
+ *   3. Activity heatmap (365d)       8. All-time statistics
+ *   4. Monthly activity calendar     9. Rating progression
+ *   5. Weekly performance           10. Recent solved problems
+ *   — Problem solving progress between 5 and 6
  *
  * Layout: white bands for the personal "training" chapters, then a full-bleed
  * Studio Mist band for the deeper data chapters, per DESIGN.md. Each section
@@ -57,7 +57,12 @@ export default async function Dashboard() {
           <RecentOverview data={data} />
         </section>
 
-        {/* 3 + 4. Calendar and weekly performance side by side on desktop */}
+        {/* 3. Activity heatmap — sits above the monthly calendar */}
+        <section aria-label="Activity heatmap">
+          <ActivityHeatmap days={data.activity} />
+        </section>
+
+        {/* 4 + 5. Monthly calendar and weekly performance side by side */}
         <section
           aria-label="Activity calendar and weekly performance"
           className="grid grid-cols-1 gap-5 lg:grid-cols-2"
@@ -72,34 +77,14 @@ export default async function Dashboard() {
           />
         </section>
 
-        {/* 5. Problem solving progress */}
+        {/* Problem solving progress */}
         <section aria-label="Problem solving progress">
           <CumulativeProgressChart series={data.cumulative} />
         </section>
       </section>
 
-      {/* Deeper data band — full-bleed Studio Mist */}
-      <section aria-label="Practice insights" className="w-full bg-studio-mist">
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-5 py-10 sm:px-6 lg:px-10">
-          <PracticeSection
-            weeklyActivity={data.weeklyActivity}
-            solvedProblems={data.solvedProblems}
-            activity={data.activity}
-          />
-        </div>
-      </section>
-
-      {/* All-time & rating band — gallery white, quiet by design */}
-      <section
-        aria-label="All-time statistics and rating"
-        className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-5 py-10 sm:px-6 lg:px-10 lg:py-14"
-      >
-        {/* 9. All-Time Statistics */}
-        <AllTimeStats data={data} />
-
-        {/* 10. Rating progression */}
-        <RatingTrendCard history={data.ratingHistory} />
-      </section>
+      {/* Insights + all-time + recent problems (client, two bands) */}
+      <LowerSections data={data} />
     </div>
   );
 }
