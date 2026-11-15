@@ -5,9 +5,10 @@ import { cn, formatNumber } from "@/lib/utils";
 
 interface StatCardProps {
   label: string;
-  value: number | null;
+  /** Integers render with separators; strings (e.g. "2.9") pass through. */
+  value: number | string | null;
   icon: LucideIcon;
-  /** Optional quiet caption under the value (e.g. current month name). */
+  /** Optional quiet caption under the value (context row). */
   caption?: string;
   /** Render % suffix for rates. */
   suffix?: string;
@@ -37,8 +38,11 @@ export function StatCard({
             value == null && "text-steel",
           )}
         >
-          {value == null ? "—" : formatNumber(value)}
-          {value == null ? "" : suffix}
+          {value == null
+            ? "—"
+            : typeof value === "string"
+              ? value
+              : `${formatNumber(value)}${suffix}`}
         </span>
         {caption ? (
           <span className="text-[12px] leading-4 text-steel">{caption}</span>

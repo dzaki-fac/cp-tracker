@@ -19,8 +19,14 @@ import {
   type ChartTooltipProps,
 } from "@/components/charts/chart-tooltip";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { formatNumber, formatDayKey } from "@/lib/utils";
 import { dayKeyOffset, todayDayKey } from "@/lib/statistics";
+import {
+  formatAxisTick,
+  formatDayKey,
+  formatNumber,
+  niceTicks,
+  xAxisTicks,
+} from "@/lib/utils";
 import type { CumulativePoint } from "@/types/platform";
 
 const ACCENT = "#0071e3";
@@ -35,17 +41,14 @@ const RANGES: Array<{ id: RangeId; label: string; days: number | null }> = [
   { id: "all", label: "All time", days: null },
 ];
 
-interface SlicedSeries {
-  points: CumulativePoint[];
-  /** Cumulative total solved strictly before the range start. */
-  before: number;
-  gained: number;
+interface ChartPoint {
+  /** Milliseconds timestamp (UTC midnight of the day). */
+  at: number;
+  date: string;
+  total: number;
 }
 
-function binarySearchStart(
-  series: CumulativePoint[],
-  startKey: string,
-): number {
+function binarySearchStart(series: CumulativePoint[], startKey: string): number {
   let lo = 0;
   let hi = series.length;
   while (lo < hi) {
@@ -58,7 +61,7 @@ function binarySearchStart(
 
 function CumulativeTooltip({ active, payload }: ChartTooltipProps) {
   if (!active || !payload?.length) return null;
-  const point = payload[0]?.payload as CumulativePoint | undefined;
+  const point = payload[0]?.payload as ChartPoint | undefined;
   if (!point) return null;
   return (
     <ChartTooltipFrame>
@@ -72,22 +75,38 @@ function CumulativeTooltip({ active, payload }: ChartTooltipProps) {
 
 /**
  * Cumulative unique problems solved over time, with time-range filters.
- * Historical totals before the selected range are preserved as the baseline.
+ *
+ * The series is zero-filled per calendar day server-side (flat segments on
+ * days without solves), rendered on a numeric time axis with evenly spaced
+ * day/week/month ticks, and a 0-based Y axis with "nice" rounded ticks.
+ * Range tabs whose window already covers the entire series are hidden, since
+ * they would look identical to "All time".
  */
 export function CumulativeProgressChart({ series }: { series: CumulativePoint[] }) {
   const [range, setRange] = useState<RangeId>("30d");
-
   const today = useMemo(() => todayDayKey(), []);
 
-  const sliced = useMemo<SlicedSeries>(() => {
+  // Ranges whose window starts at/before the first data point are redundant.
+  const availableRanges = useMemo(() => {
+    const first = series[0]?.date;
+    if (!first) return RANGES;
+    return RANGES.filter(
+      (r) => r.days == null || dayKeyOffset(today, r.days - 1) > first,
+    );
+  }, [series, today]);
+  const effectiveRange = availableRanges.some((r) => r.id === range)
+    ? range
+    : "all";
+
+  const { points, before, gained } = useMemo(() => {
     if (series.length === 0) {
-      return { points: [], before: 0, gained: 0 };
+      return { points: [] as CumulativePoint[], before: 0, gained: 0 };
     }
-    if (range === "all") {
+    if (effectiveRange === "all") {
       const total = series[series.length - 1].total;
       return { points: series, before: 0, gained: total };
     }
-    const days = RANGES.find((r) => r.id === range)?.days ?? 30;
+    const days = RANGES.find((r) => r.id === effectiveRange)?.days ?? 30;
     const startKey = dayKeyOffset(today, days - 1);
     const start = binarySearchStart(series, startKey);
     const before = start > 0 ? series[start - 1].total : 0;
@@ -97,25 +116,28 @@ export function CumulativeProgressChart({ series }: { series: CumulativePoint[] 
       before,
       gained: endTotal - before,
     };
-  }, [series, range, today]);
+  }, [series, effectiveRange, today]);
 
-  const { points, before, gained } = sliced;
-  const spanDays = RANGES.find((r) => r.id === range)?.days ?? null;
-  const longSpan = range === "all" || range === "1y";
-  const tickFormatter = (value: string) => {
-    if (longSpan) {
-      // "Nov 2025" style for long ranges.
-      const [y, m] = value.split("-").map(Number);
-      return new Intl.DateTimeFormat("en-US", {
-        month: "short",
-        year: "numeric",
-        timeZone: "UTC",
-      }).format(new Date(Date.UTC(y, m - 1, 1)));
-    }
-    return formatDayKey(value).slice(0, -6); // "Nov 15"
-  };
+  const data = useMemo<ChartPoint[]>(
+    () =>
+      points.map((point) => ({
+        at: Date.parse(`${point.date}T00:00:00Z`),
+        date: point.date,
+        total: point.total,
+      })),
+    [points],
+  );
 
-  const isEmpty = points.length === 0;
+  const maxTotal = points.length > 0 ? points[points.length - 1].total : 0;
+  const yTicks = useMemo(() => niceTicks(Math.max(maxTotal, 1)), [maxTotal]);
+  const xTicks = useMemo(
+    () => (data.length > 0 ? xAxisTicks(data[0].at, data[data.length - 1].at) : []),
+    [data],
+  );
+  const firstTick = xTicks[0] ?? 0;
+
+  const isEmpty = data.length === 0;
+  const spanDays = RANGES.find((r) => r.id === effectiveRange)?.days ?? null;
 
   return (
     <Card className="flex flex-col gap-5 p-7">
@@ -126,34 +148,37 @@ export function CumulativeProgressChart({ series }: { series: CumulativePoint[] 
             Problem solving progress
           </CardTitle>
           <CardDescription className="numeric">
-            {range === "all"
-              ? `${formatNumber(gained)} problems solved in total`
-              : `${formatNumber(gained)} problems solved · ${formatNumber(before + gained)} total`}
+            +{formatNumber(gained)} solved in this range
+            {gained === 0 && spanDays !== null
+              ? ` (last ${spanDays} days)`
+              : ""}
           </CardDescription>
         </CardHeader>
 
-        {/* Segmented range control */}
-        <div
-          role="tablist"
-          aria-label="Time range"
-          className="flex w-fit items-center gap-0.5 rounded-pill bg-studio-mist p-1"
-        >
-          {RANGES.map((r) => (
-            <button
-              key={r.id}
-              role="tab"
-              aria-selected={range === r.id}
-              onClick={() => setRange(r.id)}
-              className={`rounded-pill px-3 py-1.5 text-[12px] leading-4 tracking-[-0.12px] transition-colors duration-200 ${
-                range === r.id
-                  ? "bg-gallery-white font-medium text-ink shadow-subtle"
-                  : "text-slate hover:text-ink"
-              }`}
-            >
-              {r.label}
-            </button>
-          ))}
-        </div>
+        {/* Segmented range control — hidden when only one range applies. */}
+        {availableRanges.length > 1 ? (
+          <div
+            role="tablist"
+            aria-label="Time range"
+            className="flex w-fit items-center gap-0.5 rounded-pill bg-studio-mist p-1"
+          >
+            {availableRanges.map((r) => (
+              <button
+                key={r.id}
+                role="tab"
+                aria-selected={effectiveRange === r.id}
+                onClick={() => setRange(r.id)}
+                className={`rounded-pill px-3 py-1.5 text-[12px] leading-4 tracking-[-0.12px] transition-colors duration-200 ${
+                  effectiveRange === r.id
+                    ? "bg-gallery-white font-medium text-ink shadow-subtle"
+                    : "text-slate hover:text-ink"
+                }`}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <div className="h-72 w-full">
@@ -165,7 +190,7 @@ export function CumulativeProgressChart({ series }: { series: CumulativePoint[] 
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart
-              data={points}
+              data={data}
               margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
             >
               <defs>
@@ -176,20 +201,23 @@ export function CumulativeProgressChart({ series }: { series: CumulativePoint[] 
               </defs>
               <CartesianGrid vertical={false} stroke="#e6e6e8" />
               <XAxis
-                dataKey="date"
+                dataKey="at"
+                type="number"
+                scale="time"
+                domain={["dataMin", "dataMax"]}
+                ticks={xTicks}
+                tickFormatter={(value: number) => formatAxisTick(value, firstTick)}
                 tick={{ fontSize: 12, fill: "#707070" }}
                 tickLine={false}
                 axisLine={{ stroke: "#d6d6d6" }}
-                minTickGap={48}
-                interval="preserveStartEnd"
-                tickFormatter={tickFormatter}
               />
               <YAxis
+                ticks={yTicks}
+                domain={[0, yTicks[yTicks.length - 1] ?? 1]}
+                allowDecimals={false}
                 tick={{ fontSize: 12, fill: "#707070" }}
                 tickLine={false}
                 axisLine={false}
-                allowDecimals={false}
-                domain={[before, (max: number) => Math.ceil(max)]}
               />
               <Tooltip content={<CumulativeTooltip />} cursor={{ stroke: "#d6d6d6" }} />
               <Area
@@ -206,6 +234,11 @@ export function CumulativeProgressChart({ series }: { series: CumulativePoint[] 
           </ResponsiveContainer>
         )}
       </div>
+      {before > 0 && gained > 0 ? (
+        <p className="numeric -mt-3 text-[12px] leading-4 text-steel">
+          {formatNumber(before)} solved before this range
+        </p>
+      ) : null}
     </Card>
   );
 }

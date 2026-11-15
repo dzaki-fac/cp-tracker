@@ -4,12 +4,15 @@ import {
   buildCumulativeSeries,
   buildDailyActivity,
   buildRatingDistribution,
+  computeStreaks,
   countSolvedPerDay,
   countSolvedThisMonth,
   countSolvedThisYear,
+  dayKeyDiff,
   dayKeyFromUnix,
   dayKeyOffset,
   dayKeyRange,
+  fillRatingBuckets,
   monthKeyFromDayKey,
 } from "@/lib/statistics";
 import type { SolvedProblem } from "@/types/platform";
@@ -64,6 +67,12 @@ describe("day bucketing (Asia/Jakarta)", () => {
       "2026-01-02",
     ]);
   });
+
+  it("computes day differences across month boundaries", () => {
+    expect(dayKeyDiff("2025-01-31", "2025-02-01")).toBe(1);
+    expect(dayKeyDiff("2025-02-01", "2025-01-31")).toBe(-1);
+    expect(dayKeyDiff("2025-11-10", "2025-11-15")).toBe(5);
+  });
 });
 
 describe("countSolvedPerDay / activity", () => {
@@ -102,22 +111,108 @@ describe("countSolvedPerDay / activity", () => {
   });
 });
 
+describe("computeStreaks", () => {
+  const days = (counts: number[]) =>
+    counts.map((count, i) => ({
+      date: `2025-11-${String(1 + i).padStart(2, "0")}`,
+      count,
+    }));
+
+  it("counts the current streak ending on the last active day", () => {
+    // Last day active → current = trailing run.
+    expect(computeStreaks(days([1, 0, 2, 1, 3]))).toEqual({
+      current: 3,
+      longest: 3,
+    });
+  });
+
+  it("keeps the current streak alive when today has no solves yet", () => {
+    // Today (last entry) empty → streak continues from yesterday.
+    expect(computeStreaks(days([2, 1, 0]))).toEqual({
+      current: 2,
+      longest: 2,
+    });
+  });
+
+  it("reports the longest streak even when it is in the past", () => {
+    expect(computeStreaks(days([1, 1, 1, 1, 0, 0]))).toEqual({
+      current: 0, // today + yesterday both empty
+      longest: 4,
+    });
+  });
+
+  it("returns zeros for an empty window", () => {
+    expect(computeStreaks([])).toEqual({ current: 0, longest: 0 });
+  });
+});
+
+describe("fillRatingBuckets", () => {
+  it("fills empty 100-step buckets between min and max with count 0", () => {
+    const filled = fillRatingBuckets([
+      { rating: 800, count: 2 },
+      { rating: 1200, count: 5 },
+    ]);
+    expect(filled).toEqual([
+      { rating: 800, count: 2 },
+      { rating: 900, count: 0 },
+      { rating: 1000, count: 0 },
+      { rating: 1100, count: 0 },
+      { rating: 1200, count: 5 },
+    ]);
+  });
+
+  it("merges unusual non-multiple ratings into the nearest bucket", () => {
+    const filled = fillRatingBuckets([
+      { rating: 1197, count: 1 },
+      { rating: 1603, count: 2 },
+    ]);
+    expect(filled[0]).toEqual({ rating: 1200, count: 1 });
+    expect(filled[filled.length - 1]).toEqual({ rating: 1600, count: 2 });
+    expect(filled.map((b) => b.rating)).toEqual([
+      1200, 1300, 1400, 1500, 1600,
+    ]);
+  });
+
+  it("returns an empty array when there are no rated problems", () => {
+    expect(fillRatingBuckets([{ rating: null, count: 3 }])).toEqual([]);
+    expect(fillRatingBuckets([])).toEqual([]);
+  });
+});
+
 describe("buildCumulativeSeries", () => {
   it("accumulates totals across days in order", () => {
     const t1 = Date.UTC(2025, 10, 12, 2, 0) / 1000; // 2025-11-12
     const t2 = Date.UTC(2025, 10, 12, 8, 0) / 1000; // same day
     const t3 = Date.UTC(2025, 10, 13, 8, 0) / 1000; // 2025-11-13
+    const now = Date.UTC(2025, 10, 13, 12, 0); // today: 2025-11-13
 
-    const series = buildCumulativeSeries([
-      solved("A", t2),
-      solved("B", t1),
-      solved("C", t3),
-    ]);
+    const series = buildCumulativeSeries(
+      [solved("A", t2), solved("B", t1), solved("C", t3)],
+      now,
+    );
 
     expect(series).toEqual([
       { date: "2025-11-12", total: 2 },
       { date: "2025-11-13", total: 3 },
     ]);
+  });
+
+  it("zero-fills days without solves so the time axis is complete", () => {
+    const t1 = Date.UTC(2025, 10, 12, 2, 0) / 1000; // 2025-11-12
+    const t2 = Date.UTC(2025, 10, 14, 2, 0) / 1000; // 2025-11-14
+    const now = Date.UTC(2025, 10, 14, 12, 0); // today: 2025-11-14
+
+    const series = buildCumulativeSeries([solved("A", t1), solved("B", t2)], now);
+
+    expect(series).toEqual([
+      { date: "2025-11-12", total: 1 },
+      { date: "2025-11-13", total: 1 }, // no change — flat day
+      { date: "2025-11-14", total: 2 },
+    ]);
+  });
+
+  it("returns an empty series when nothing is solved", () => {
+    expect(buildCumulativeSeries([], Date.UTC(2025, 10, 14, 12, 0))).toEqual([]);
   });
 });
 

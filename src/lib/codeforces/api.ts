@@ -131,27 +131,35 @@ export async function fetchRatingHistory(
   );
 }
 
+/** Hard upper bound so a misbehaving upstream can never loop forever. */
+const MAX_SUBMISSIONS = 100_000;
+
 /**
- * Fetch the complete submission history by walking the paginated endpoint.
- * The API supports `from`/`count`; we page until a short page is returned.
+ * Fetch the complete submission history by walking the paginated endpoint
+ * (`from` + `count`) until a page comes back empty. `from` advances by the
+ * number of submissions actually received, so a silent upstream page-size cap
+ * can never cause skipped records. `paceRequests` keeps a small delay between
+ * consecutive pages to respect the rate limit.
+ *
+ * The API returns newest first; results are normalized to oldest first.
  */
 export async function fetchAllSubmissions(
   handle: string,
 ): Promise<CodeforcesSubmission[]> {
   const all: CodeforcesSubmission[] = [];
   const handleParam = encodeURIComponent(handle);
+  let from = 1;
 
-  for (let from = 1; ; from += SUBMISSIONS_PAGE_SIZE) {
+  while (from <= MAX_SUBMISSIONS) {
     const page = await fetchEnvelope<CodeforcesSubmission[]>(
       `user.status?handle=${handleParam}&from=${from}&count=${SUBMISSIONS_PAGE_SIZE}`,
     );
 
     if (!Array.isArray(page) || page.length === 0) break;
     all.push(...page);
-    if (page.length < SUBMISSIONS_PAGE_SIZE) break;
+    from += page.length;
   }
 
-  // The API returns newest first; normalize to oldest first for downstream math.
   return all.reverse();
 }
 

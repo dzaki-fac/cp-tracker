@@ -1,19 +1,23 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
   ArrowDown,
   ArrowUp,
+  Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
-  ExternalLink,
   ListChecks,
   Search,
+  X,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Hint } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -30,6 +34,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { getRankColor } from "@/lib/cf-rank";
 import { DISPLAY_TIMEZONE } from "@/lib/config";
 import { distinctRatings, distinctTags } from "@/lib/statistics";
 import { cn, formatNumber } from "@/lib/utils";
@@ -52,14 +57,44 @@ function formatDate(unixSeconds: number): string {
   return DATE_FORMAT.format(new Date(unixSeconds * 1000));
 }
 
+/** Label for the contest column: contest name when known, "Gym" for gyms. */
+function contestLabel(
+  problem: SolvedProblem,
+  contestNames: Record<number, string>,
+): string | null {
+  if (problem.contestId == null) return null;
+  if (problem.contestId >= 100000) return "Gym";
+  return contestNames[problem.contestId] ?? `Contest ${problem.contestId}`;
+}
+
+function contestHref(problem: SolvedProblem): string | null {
+  if (problem.contestId == null) return null;
+  return problem.contestId >= 100000
+    ? `https://codeforces.com/gym/${problem.contestId}`
+    : `https://codeforces.com/contest/${problem.contestId}`;
+}
+
+interface SolvedProblemsTableProps {
+  problems: SolvedProblem[];
+  /** contestId → contest name (best effort; "Contest {id}" as fallback). */
+  contestNames?: Record<number, string>;
+  /** Controlled tag selection (union filter), shared with the tag breakdown. */
+  selectedTags: string[];
+  onTagsChange: (tags: string[]) => void;
+}
+
 /**
  * Searchable, filterable, sortable, paginated list of unique solved problems.
  * Deduplication happens server-side; every row is one unique problem.
  */
-export function SolvedProblemsTable({ problems }: { problems: SolvedProblem[] }) {
+export function SolvedProblemsTable({
+  problems,
+  contestNames = {},
+  selectedTags = [],
+  onTagsChange,
+}: SolvedProblemsTableProps) {
   const [query, setQuery] = useState("");
   const [ratingFilter, setRatingFilter] = useState("all");
-  const [tagFilter, setTagFilter] = useState("all");
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [pageSize, setPageSize] = useState(25);
@@ -68,16 +103,28 @@ export function SolvedProblemsTable({ problems }: { problems: SolvedProblem[] })
   const ratings = useMemo(() => distinctRatings(problems), [problems]);
   const tags = useMemo(() => distinctTags(problems), [problems]);
 
+  const toggleTag = (tag: string) => {
+    onTagsChange(
+      selectedTags.includes(tag)
+        ? selectedTags.filter((t) => t !== tag)
+        : [...selectedTags, tag],
+    );
+  };
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return problems.filter((p) => {
       if (q && !p.name.toLowerCase().includes(q)) return false;
       if (ratingFilter !== "all" && String(p.rating ?? "unrated") !== ratingFilter)
         return false;
-      if (tagFilter !== "all" && !p.tags.includes(tagFilter)) return false;
+      if (
+        selectedTags.length > 0 &&
+        !selectedTags.some((tag) => p.tags.includes(tag))
+      )
+        return false;
       return true;
     });
-  }, [problems, query, ratingFilter, tagFilter]);
+  }, [problems, query, ratingFilter, selectedTags]);
 
   const sorted = useMemo(() => {
     const dir = sortDir === "asc" ? 1 : -1;
@@ -172,25 +219,67 @@ export function SolvedProblemsTable({ problems }: { problems: SolvedProblem[] })
               </SelectContent>
             </Select>
 
-            <Select
-              value={tagFilter}
-              onValueChange={(v) => {
-                setTagFilter(v);
-                resetPage();
-              }}
-            >
-              <SelectTrigger className="sm:w-52" aria-label="Filter by tag">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All tags</SelectItem>
-                {tags.map(({ tag }) => (
-                  <SelectItem key={tag} value={tag}>
-                    {tag}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* Tag multi-select popover */}
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button
+                  type="button"
+                  className="flex h-9 items-center justify-between gap-2 rounded-pill border border-steel bg-gallery-white px-3.5 text-[13px] leading-[1.2] text-ink transition-colors outline-none hover:border-slate data-[state=open]:border-apple-blue focus-visible:border-apple-blue focus-visible:ring-2 focus-visible:ring-apple-blue/25 sm:w-52"
+                  aria-label="Filter by tag"
+                >
+                  <span className="truncate">
+                    {selectedTags.length === 0
+                      ? "All tags"
+                      : `${formatNumber(selectedTags.length)} tag${
+                          selectedTags.length === 1 ? "" : "s"
+                        }`}
+                  </span>
+                  <ChevronDown className="size-3.5 shrink-0 text-steel" aria-hidden />
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  sideOffset={6}
+                  align="start"
+                  className="z-50 max-h-72 w-64 overflow-y-auto overscroll-contain rounded-[14px] border border-hairline-silver bg-gallery-white p-1 shadow-[0_12px_40px_rgb(0_0_0/0.12)]"
+                >
+                  {tags.map(({ tag, count }) => (
+                    <DropdownMenu.CheckboxItem
+                      key={tag}
+                      checked={selectedTags.includes(tag)}
+                      onCheckedChange={() => toggleTag(tag)}
+                      onSelect={(event) => event.preventDefault()}
+                      className="relative flex cursor-default select-none items-center gap-2 rounded-[8px] py-1.5 pl-8 pr-3 text-[13px] leading-[1.2] text-ink outline-none transition-colors data-[highlighted]:bg-studio-mist"
+                    >
+                      <span className="absolute left-2.5 flex items-center">
+                        <DropdownMenu.ItemIndicator>
+                          <Check
+                            className="size-3.5 text-pricing-blue"
+                            aria-hidden
+                          />
+                        </DropdownMenu.ItemIndicator>
+                      </span>
+                      <span className="flex-1 truncate">{tag}</span>
+                      <span className="numeric text-[12px] text-steel">
+                        {formatNumber(count)}
+                      </span>
+                    </DropdownMenu.CheckboxItem>
+                  ))}
+                  {selectedTags.length > 0 ? (
+                    <>
+                      <DropdownMenu.Separator className="my-1 h-px bg-hairline-silver" />
+                      <DropdownMenu.Item
+                        onSelect={() => onTagsChange([])}
+                        className="flex cursor-default select-none items-center gap-2 rounded-[8px] px-3 py-1.5 text-[13px] leading-[1.2] text-slate outline-none transition-colors data-[highlighted]:bg-studio-mist"
+                      >
+                        <X className="size-3.5" aria-hidden />
+                        Clear tag filter
+                      </DropdownMenu.Item>
+                    </>
+                  ) : null}
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
           </div>
 
           {/* Table */}
@@ -203,7 +292,7 @@ export function SolvedProblemsTable({ problems }: { problems: SolvedProblem[] })
               <TableHeader>
                 <TableRow>
                   <TableHead className="min-w-56">Problem</TableHead>
-                  <TableHead>
+                  <TableHead className="text-right">
                     <button
                       onClick={() => toggleSort("rating")}
                       className="inline-flex items-center gap-1 transition-colors hover:text-ink"
@@ -220,7 +309,7 @@ export function SolvedProblemsTable({ problems }: { problems: SolvedProblem[] })
                     </button>
                   </TableHead>
                   <TableHead className="min-w-40">Tags</TableHead>
-                  <TableHead className="text-right">Contest</TableHead>
+                  <TableHead className="min-w-36">Contest</TableHead>
                   <TableHead>
                     <button
                       onClick={() => toggleSort("date")}
@@ -240,55 +329,82 @@ export function SolvedProblemsTable({ problems }: { problems: SolvedProblem[] })
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((p) => (
-                  <TableRow key={p.key}>
-                    <TableCell className="max-w-72">
-                      {p.url ? (
-                        <a
-                          href={p.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex max-w-full items-center gap-1 truncate text-apple-blue hover:underline underline-offset-2"
-                        >
-                          <span className="truncate">{p.name}</span>
-                          <ExternalLink
-                            className="size-3 shrink-0"
-                            aria-hidden
-                          />
-                        </a>
-                      ) : (
-                        <span className="truncate">{p.name}</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="numeric w-20">
-                      {p.rating != null ? (
-                        formatNumber(p.rating)
-                      ) : (
-                        <span className="text-steel">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="max-w-52">
-                      <div className="flex flex-wrap gap-1">
-                        {p.tags.slice(0, 3).map((tag) => (
-                          <Badge key={tag} variant="default" className="max-w-40 truncate">
-                            {tag}
-                          </Badge>
-                        ))}
-                        {p.tags.length > 3 ? (
-                          <span className="self-center text-[12px] text-steel">
-                            +{p.tags.length - 3}
+                {rows.map((p) => {
+                  const label = contestLabel(p, contestNames);
+                  const href = contestHref(p);
+                  return (
+                    <TableRow key={p.key}>
+                      <TableCell className="max-w-72">
+                        {p.url ? (
+                          <a
+                            href={p.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={`Open ${p.name} on Codeforces`}
+                            className="block max-w-full truncate text-apple-blue hover:underline underline-offset-2"
+                          >
+                            {p.name}
+                          </a>
+                        ) : (
+                          <span className="block truncate">{p.name}</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="w-20 text-right">
+                        {p.rating != null ? (
+                          <span
+                            className="numeric font-medium"
+                            style={{ color: getRankColor(p.rating) }}
+                          >
+                            {formatNumber(p.rating)}
                           </span>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell className="numeric w-20 text-right text-slate">
-                      {p.contestId ?? "—"}
-                    </TableCell>
-                    <TableCell className="numeric w-32">
-                      {formatDate(p.firstSolvedAt)}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                        ) : (
+                          <span className="text-steel">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="max-w-52">
+                        <div className="flex flex-wrap gap-1">
+                          {p.tags.slice(0, 3).map((tag) => (
+                            <Badge
+                              key={tag}
+                              variant="default"
+                              className="max-w-40 truncate"
+                            >
+                              {tag}
+                            </Badge>
+                          ))}
+                          {p.tags.length > 3 ? (
+                            <Hint content={p.tags.slice(3).join(", ")}>
+                              <span
+                                tabIndex={0}
+                                className="numeric self-center cursor-help rounded-[4px] text-[12px] text-steel outline-none focus-visible:ring-2 focus-visible:ring-apple-blue/40"
+                              >
+                                +{p.tags.length - 3}
+                              </span>
+                            </Hint>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell className="max-w-44">
+                        {label && href ? (
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={`Open contest ${label} on Codeforces`}
+                            className="block max-w-full truncate text-slate hover:text-apple-blue hover:underline underline-offset-2"
+                          >
+                            {label}
+                          </a>
+                        ) : (
+                          <span className="text-steel">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="numeric w-32">
+                        {formatDate(p.firstSolvedAt)}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}

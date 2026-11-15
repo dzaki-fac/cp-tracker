@@ -3,7 +3,11 @@
  * domain types. All counting rules live here / in `lib/statistics.ts`.
  */
 
-import type { PlatformIdentity, SolvedProblem } from "@/types/platform";
+import type {
+  PlatformIdentity,
+  RatingHistoryPoint,
+  SolvedProblem,
+} from "@/types/platform";
 import type {
   CodeforcesProblem,
   CodeforcesRatingChange,
@@ -145,13 +149,19 @@ export function buildIdentity(
 /** Map raw rating changes into the normalized progression curve. */
 export function buildRatingHistory(
   changes: CodeforcesRatingChange[],
-): { at: number; rating: number; contestName: string }[] {
+): RatingHistoryPoint[] {
   return changes
-    .filter((c) => typeof c?.ratingUpdateTimeSeconds === "number")
-    .map((c) => ({
-      at: c.ratingUpdateTimeSeconds,
-      rating: c.newRating,
-      contestName: c.contestName,
+    .filter(
+      (change) =>
+        typeof change?.ratingUpdateTimeSeconds === "number" &&
+        typeof change?.newRating === "number",
+    )
+    .map((change) => ({
+      at: change.ratingUpdateTimeSeconds,
+      rating: change.newRating,
+      delta: change.newRating - (typeof change.oldRating === "number" ? change.oldRating : change.newRating),
+      contestId: typeof change.contestId === "number" ? change.contestId : null,
+      contestName: change.contestName,
     }))
     .sort((a, b) => a.at - b.at);
 }

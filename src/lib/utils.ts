@@ -38,3 +38,81 @@ export function formatDayKey(dayKey: string): string {
     timeZone: "UTC",
   }).format(new Date(Date.UTC(y, m - 1, d)));
 }
+
+const MONTHS_SHORT = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+/**
+ * "Nice" Y-axis ticks from 0 up to a rounded maximum, using 1/2/5 steps so
+ * charts never end on raw values like 294.
+ */
+export function niceTicks(max: number, targetTicks = 6): number[] {
+  if (max <= 0) return [0, 1];
+  const rough = max / Math.max(1, targetTicks);
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rough)));
+  const step =
+    [1, 2, 5, 10].map((m) => m * magnitude).find((s) => s >= rough) ??
+    10 * magnitude;
+  const top = Math.ceil(max / step) * step;
+  const ticks: number[] = [];
+  for (let value = 0; value <= top; value += step) ticks.push(value);
+  return ticks;
+}
+
+/**
+ * Evenly spaced, day-aligned X-axis ticks for a numeric time axis.
+ *
+ * - ≤ 10 days: a tick every 2 days (7d / 14d views).
+ * - ≤ 70 days: a tick every 7 days (30d / 90d views).
+ * - Longer spans: explicit first-of-month ticks ("tick bulanan eksplisit").
+ * Always returns at least one tick.
+ */
+export function xAxisTicks(startMs: number, endMs: number): number[] {
+  const DAY_MS = 86_400_000;
+  const spanDays = Math.round((endMs - startMs) / DAY_MS);
+  const ticks: number[] = [];
+
+  if (spanDays <= 10) {
+    for (let t = startMs; t <= endMs; t += 2 * DAY_MS) ticks.push(t);
+  } else if (spanDays <= 70) {
+    for (let t = startMs; t <= endMs; t += 7 * DAY_MS) ticks.push(t);
+  } else {
+    const cursor = new Date(startMs);
+    cursor.setUTCDate(1);
+    if (cursor.getTime() < startMs) cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+    while (cursor.getTime() <= endMs) {
+      ticks.push(cursor.getTime());
+      cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+    }
+  }
+
+  if (ticks.length === 0) ticks.push(startMs);
+  return ticks;
+}
+
+/**
+ * Label for an X-axis tick from `xAxisTicks`. Month-boundary ticks (UTC day 1)
+ * render as "Nov"; January and the first tick also show the year ("Jan 2026");
+ * day ticks render as "Nov 15".
+ */
+export function formatAxisTick(ms: number, firstTickMs: number): string {
+  const date = new Date(ms);
+  const month = MONTHS_SHORT[date.getUTCMonth()];
+  if (date.getUTCDate() === 1) {
+    const showYear = date.getUTCMonth() === 0 || ms === firstTickMs;
+    return showYear ? `${month} ${date.getUTCFullYear()}` : month;
+  }
+  return `${month} ${date.getUTCDate()}`;
+}

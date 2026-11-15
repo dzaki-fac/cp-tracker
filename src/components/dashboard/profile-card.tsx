@@ -3,6 +3,7 @@ import { ArrowUpRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { PlatformAvatar } from "@/components/dashboard/platform-avatar";
+import { getRankColorByName } from "@/lib/cf-rank";
 import type { PlatformIdentity } from "@/types/platform";
 import { formatNumber } from "@/lib/utils";
 
@@ -16,8 +17,12 @@ function formatMemberSince(unixSeconds: number): string {
 /**
  * Profile card — identity, rating summary and a link to the upstream profile.
  * Presentation only: all platform data arrives normalized via PlatformIdentity.
+ * Rank labels are tinted with the official Codeforces rank colors.
  */
 export function ProfileCard({ profile }: { profile: PlatformIdentity }) {
+  const currentRankColor = getRankColorByName(profile.rankCurrent);
+  const maxRankColor = getRankColorByName(profile.rankMax);
+
   return (
     <Card className="flex h-full flex-col gap-6 p-7 sm:flex-row sm:items-center">
       <PlatformAvatar
@@ -32,7 +37,11 @@ export function ProfileCard({ profile }: { profile: PlatformIdentity }) {
             {profile.handle}
           </h2>
           {profile.rankCurrent ? (
-            <Badge variant="outline" className="mt-1.5 capitalize">
+            <Badge
+              variant="outline"
+              className="mt-1.5 capitalize"
+              style={currentRankColor ? { color: currentRankColor } : undefined}
+            >
               {profile.rankCurrent}
             </Badge>
           ) : null}
@@ -60,7 +69,12 @@ export function ProfileCard({ profile }: { profile: PlatformIdentity }) {
           {profile.rankMax ? (
             <span>
               <span className="text-steel">Max rank </span>
-              <span className="capitalize">{profile.rankMax}</span>
+              <span
+                className="font-medium capitalize"
+                style={maxRankColor ? { color: maxRankColor } : undefined}
+              >
+                {profile.rankMax}
+              </span>
             </span>
           ) : null}
           {profile.memberSince ? (
@@ -77,7 +91,8 @@ export function ProfileCard({ profile }: { profile: PlatformIdentity }) {
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1 text-[14px] leading-[1.29] text-apple-blue transition-colors hover:underline underline-offset-2"
         >
-          View profile on {profile.platform === "codeforces" ? "Codeforces" : profile.platform}
+          View profile on{" "}
+          {profile.platform === "codeforces" ? "Codeforces" : profile.platform}
           <ArrowUpRight className="size-3.5" aria-hidden />
         </a>
       </div>

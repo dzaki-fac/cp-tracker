@@ -22,8 +22,13 @@ export const API_TIMEOUT_MS = Number(
   process.env.CODEFORCES_API_TIMEOUT_MS ?? 15_000,
 );
 
-/** Maximum submissions fetched per page from the Codeforces API. */
-export const SUBMISSIONS_PAGE_SIZE = 1_000;
+/**
+ * Maximum submissions requested per page from the Codeforces API.
+ * Kept at 500 (well inside the documented limit) so a silent upstream
+ * page-size cap can never cause skipped records; pagination advances by the
+ * number of submissions actually received.
+ */
+export const SUBMISSIONS_PAGE_SIZE = 500;
 
 /** Codeforces REST API base URL. */
 export const CODEFORCES_API_BASE = "https://codeforces.com/api";

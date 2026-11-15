@@ -3,13 +3,10 @@ import { getDashboardData } from "@/lib/dashboard";
 
 import { DashboardError } from "@/components/dashboard/dashboard-error";
 import { FreshnessBar } from "@/components/dashboard/freshness-bar";
+import { InsightsSection } from "@/components/dashboard/insights-section";
 import { ProfileCard } from "@/components/dashboard/profile-card";
 import { StatsGrid } from "@/components/dashboard/stats-grid";
-import { ActivityHeatmap } from "@/components/charts/activity-heatmap";
-import { CumulativeProgressChart } from "@/components/charts/cumulative-progress-chart";
-import { RatingDistributionChart } from "@/components/charts/rating-distribution-chart";
 import { RatingTrendCard } from "@/components/charts/rating-trend-card";
-import { SolvedProblemsTable } from "@/components/problems/solved-problems-table";
 
 /**
  * Server component: fetches the normalized dashboard payload and composes
@@ -34,6 +31,13 @@ export default async function Dashboard() {
   }
 
   const { profile, stale } = data;
+
+  // Best-effort contest name map for the table's Contest column (rated
+  // contests come from the rating history; unrated ones fall back to the id).
+  const contestNames: Record<number, string> = {};
+  for (const point of data.ratingHistory) {
+    if (point.contestId != null) contestNames[point.contestId] = point.contestName;
+  }
 
   return (
     <div>
@@ -60,15 +64,14 @@ export default async function Dashboard() {
       {/* Insights band — full-bleed Studio Mist */}
       <section aria-label="Insights" className="w-full bg-studio-mist">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-5 py-12 sm:px-6 lg:px-10">
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-            <RatingDistributionChart
-              buckets={data.ratingDistribution}
-              unrated={data.unratedSolved}
-            />
-            <CumulativeProgressChart series={data.cumulative} />
-          </div>
-          <ActivityHeatmap days={data.activity} total={data.activityTotal} />
-          <SolvedProblemsTable problems={data.solvedProblems} />
+          <InsightsSection
+            buckets={data.ratingDistribution}
+            unrated={data.unratedSolved}
+            cumulative={data.cumulative}
+            activity={data.activity}
+            solvedProblems={data.solvedProblems}
+            contestNames={contestNames}
+          />
         </div>
       </section>
     </div>

@@ -29,8 +29,12 @@ import {
   buildCumulativeSeries,
   buildDailyActivity,
   buildRatingDistribution,
+  computeStreaks,
   countSolvedThisMonth,
   countSolvedThisYear,
+  dayKeyDiff,
+  dayKeyFromUnix,
+  todayDayKey,
 } from "@/lib/statistics";
 import type { DashboardData } from "@/types/platform";
 
@@ -65,6 +69,26 @@ function aggregate(parts: {
   const distribution = buildRatingDistribution(solved);
   const nowMs = Date.now();
 
+  // All-time activity metrics: distinct active days, streaks and averages.
+  let activeDays = 0;
+  let currentStreakDays = 0;
+  let longestStreakDays = 0;
+  if (solved.length > 0) {
+    const firstKey = dayKeyFromUnix(
+      Math.min(...solved.map((problem) => problem.firstSolvedAt)),
+    );
+    const span = Math.max(1, dayKeyDiff(firstKey, todayDayKey(nowMs)) + 1);
+    const allDays = buildDailyActivity(solved, span, nowMs).days;
+    activeDays = allDays.reduce((count, day) => (day.count > 0 ? count + 1 : count), 0);
+    const streaks = computeStreaks(allDays);
+    currentStreakDays = streaks.current;
+    longestStreakDays = streaks.longest;
+  }
+  const avgPerActiveDay =
+    activeDays > 0
+      ? Math.round((solved.length / activeDays) * 10) / 10
+      : null;
+
   return {
     platform: "codeforces",
     handle,
@@ -89,10 +113,15 @@ function aggregate(parts: {
     activity: activity.days,
     activityTotal: activity.total,
 
-    cumulative: buildCumulativeSeries(solved),
+    cumulative: buildCumulativeSeries(solved, nowMs),
 
     ratingHistory: buildRatingHistory(ratingHistory),
     solvedProblems: solved,
+
+    activeDays,
+    avgPerActiveDay,
+    currentStreakDays,
+    longestStreakDays,
   };
 }
 

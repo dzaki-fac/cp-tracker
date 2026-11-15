@@ -6,7 +6,7 @@
  */
 
 import { DISPLAY_TIMEZONE } from "@/lib/config";
-import type { SolvedProblem } from "@/types/platform";
+import type { RatingBucket, SolvedProblem } from "@/types/platform";
 
 /** en-CA yields ISO-like day keys ("2026-11-15") — used for stable bucketing. */
 const dayFormatter = new Intl.DateTimeFormat("en-CA", {
@@ -57,6 +57,80 @@ export function dayKeyRange(startDayKey: string, endDayKey: string): string[] {
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
   return keys;
+}
+
+/** Day count from day key `a` to day key `b` (b - a, positive when b later). */
+export function dayKeyDiff(a: string, b: string): number {
+  const toUtc = (key: string) => {
+    const [y, m, d] = key.split("-").map(Number);
+    return Date.UTC(y, m - 1, d);
+  };
+  return Math.round((toUtc(b) - toUtc(a)) / 86_400_000);
+}
+
+/**
+ * Fill missing rating buckets with count 0 so the difficulty chart shows the
+ * complete 100-step range between the lowest and highest rated problem
+ * (e.g. 800, 900, … 1800) instead of a sparse set of occupied buckets.
+ * Unrated problems are never part of the returned buckets.
+ */
+export function fillRatingBuckets(
+  buckets: RatingBucket[],
+  step = 100,
+): RatingBucket[] {
+  const rated = buckets.filter(
+    (bucket): bucket is RatingBucket & { rating: number } =>
+      bucket.rating != null && bucket.count > 0,
+  );
+  if (rated.length === 0) return [];
+
+  // Normalize each rating onto the step grid (nearest bucket) so unusual
+  // non-multiple ratings merge into their bucket instead of being dropped.
+  const counts = new Map<number, number>();
+  for (const bucket of rated) {
+    const rating = Math.round(bucket.rating / step) * step;
+    counts.set(rating, (counts.get(rating) ?? 0) + bucket.count);
+  }
+  const min = Math.min(...counts.keys());
+  const max = Math.max(...counts.keys());
+
+  const filled: RatingBucket[] = [];
+  for (let rating = min; rating <= max; rating += step) {
+    filled.push({ rating, count: counts.get(rating) ?? 0 });
+  }
+  return filled;
+}
+
+/**
+ * Current and longest solving streaks from a zero-filled, ascending daily
+ * activity array (must end at "today" for the current streak to be current).
+ * A day counts towards a streak when at least one problem was first solved.
+ * If today has no solves yet, the current streak continues from yesterday.
+ */
+export function computeStreaks(days: { date: string; count: number }[]): {
+  current: number;
+  longest: number;
+} {
+  let longest = 0;
+  let run = 0;
+  for (const day of days) {
+    if (day.count > 0) {
+      run += 1;
+      longest = Math.max(longest, run);
+    } else {
+      run = 0;
+    }
+  }
+
+  let current = 0;
+  const lastIndex = days.length - 1;
+  const startBack = days[lastIndex]?.count ? 0 : 1; // today empty → count from yesterday
+  for (let i = lastIndex - startBack; i >= 0; i -= 1) {
+    if ((days[i]?.count ?? 0) <= 0) break;
+    current += 1;
+  }
+
+  return { current, longest };
 }
 
 /** Index (day count) of unique solved problems per day key. */
@@ -121,16 +195,24 @@ export function buildRatingDistribution(solved: SolvedProblem[]): {
 }
 
 /**
- * Cumulative unique-solved series: one point per day with at least one solve,
- * ascending, where `total` includes every solve up to and including that day.
+ * Cumulative unique-solved series: one point per calendar day from the first
+ * solve through today (in the display timezone), ascending, where `total`
+ * includes every solve up to and including that day. Days without solves are
+ * zero-filled so time axes show the complete timeline, including flat
+ * periods without changes.
  */
 export function buildCumulativeSeries(
   solved: SolvedProblem[],
+  nowMs: number = Date.now(),
 ): { date: string; total: number }[] {
+  if (solved.length === 0) return [];
+
   const counts = countSolvedPerDay(solved);
-  const days = [...counts.keys()].sort();
+  const firstDay = [...counts.keys()].sort()[0];
+  const today = todayDayKey(nowMs);
+
   let total = 0;
-  return days.map((date) => {
+  return dayKeyRange(firstDay, today).map((date) => {
     total += counts.get(date) ?? 0;
     return { date, total };
   });

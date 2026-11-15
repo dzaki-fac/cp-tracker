@@ -64,7 +64,12 @@ export interface CumulativePoint {
 export interface RatingHistoryPoint {
   /** Unix seconds of the rating update. */
   at: number;
+  /** New public rating after the contest. */
   rating: number;
+  /** Change from the previous rating (negative for a drop). */
+  delta: number;
+  /** Contest identifier for deep links, null when unavailable. */
+  contestId: number | null;
   contestName: string;
 }
 
@@ -96,10 +101,19 @@ export interface DashboardData {
   activity: DailyActivity[];
   activityTotal: number;
 
-  /** Full cumulative solved series, oldest first. */
+  /** Full cumulative solved series (zero-filled daily), oldest first. */
   cumulative: CumulativePoint[];
 
   ratingHistory: RatingHistoryPoint[];
 
   solvedProblems: SolvedProblem[];
+
+  /** All-time distinct days with at least one first-solve. */
+  activeDays: number;
+  /** uniqueSolved ÷ activeDays, null with no activity. */
+  avgPerActiveDay: number | null;
+  /** Consecutive active days ending today (or yesterday if today is empty). */
+  currentStreakDays: number;
+  /** Longest run of consecutive active days, all-time. */
+  longestStreakDays: number;
 }
