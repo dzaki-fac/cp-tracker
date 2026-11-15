@@ -7,9 +7,9 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDayKey, formatNumber } from "@/lib/utils";
 import type { DailyActivity } from "@/types/platform";
 
-const CELL = 11; // px
-const GAP = 3; // px
-const STEP = CELL + GAP;
+const GAP = 3; // px between cells
+const LABEL_GUTTER = 30; // px for the weekday labels
+const TOP_PADDING = 16; // px reserved for the month labels
 
 /**
  * 5-level intensity scale. Thresholds: 0, 1, 2–3, 4–6, 7+ solved per day.
@@ -43,22 +43,26 @@ interface TooltipState {
  * covering the last 365 days. Day bucketing happens server-side in
  * Asia/Jakarta (see lib/statistics.ts); this component only renders.
  *
- * The grid is horizontally scrollable when it does not fit and auto-scrolls
- * to the right (most recent days) on mount. Every day cell is focusable and
- * shows its tooltip on hover or keyboard focus.
+ * The cell size adapts to the card width so the year of week columns fills
+ * it edge to edge (capped so cells never get tiny or cartoonishly large);
+ * the grid is horizontally scrollable when it still does not fit and
+ * auto-scrolls to the right (most recent days) on mount. Every day cell is
+ * focusable and shows its tooltip on hover or keyboard focus.
  */
 export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  // Server render starts with the previous fixed size; measured below.
+  const [cell, setCell] = useState(11);
+  const step = cell + GAP;
 
   // Start with the most recent days visible when the grid overflows.
   useEffect(() => {
     const container = containerRef.current;
     if (container) container.scrollLeft = container.scrollWidth;
-  }, [days.length]);
+  }, [days.length, cell]);
 
-  const columns = useMemo<WeekColumn[]>(() => {
-    if (days.length === 0) return [];
+  const columns = useMemo<WeekColumn[]>(() => {    if (days.length === 0) return [];
     const weekday = (dayKey: string): number => {
       const [y, m, d] = dayKey.split("-").map(Number);
       return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0 = Sunday
@@ -98,11 +102,30 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
     return cols;
   }, [days]);
 
-  const showTooltip = (cell: HTMLElement, day: DailyActivity) => {
+  // Fit the week columns to the visible container width so the heatmap
+  // fills the card edge to edge (capped to keep cells readable; below the
+  // floor the grid simply scrolls).
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || columns.length === 0) return;
+    const compute = () => {
+      const width = el.clientWidth;
+      if (!width) return;
+      const n = columns.length;
+      const size = Math.floor((width - LABEL_GUTTER - (n - 1) * GAP) / n);
+      setCell(Math.max(9, Math.min(24, size)));
+    };
+    compute();
+    const observer = new ResizeObserver(compute);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [columns.length]);
+
+  const showTooltip = (cellEl: HTMLElement, day: DailyActivity) => {
     const container = containerRef.current;
     if (!container) return;
     const containerRect = container.getBoundingClientRect();
-    const cellRect = cell.getBoundingClientRect();
+    const cellRect = cellEl.getBoundingClientRect();
     setTooltip({
       x: cellRect.left - containerRect.left + cellRect.width / 2,
       y: cellRect.top - containerRect.top,
@@ -114,7 +137,7 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
   const tooltipLeft = tooltip
     ? Math.min(
         Math.max(tooltip.x, 44),
-        Math.max(44, columns.length * STEP + 30 - 44),
+        Math.max(44, columns.length * step + LABEL_GUTTER - 44),
       )
     : 0;
 
@@ -135,7 +158,7 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
         ) : (
           <div
             className="relative mx-auto w-max"
-            style={{ paddingLeft: 30, paddingTop: 16 }}
+            style={{ paddingLeft: LABEL_GUTTER, paddingTop: TOP_PADDING }}
           >
             {/* Month labels */}
             <div className="relative" style={{ height: 14 }}>
@@ -144,7 +167,7 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
                   <span
                     key={`m-${i}`}
                     className="absolute top-0 whitespace-nowrap text-[11px] leading-[14px] text-steel"
-                    style={{ left: i * STEP }}
+                    style={{ left: LABEL_GUTTER + i * step }}
                   >
                     {col.monthLabel}
                   </span>
@@ -152,17 +175,21 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
               )}
             </div>
 
-            <div className="flex gap-[3px]">
+            <div className="flex" style={{ gap: GAP }}>
               {/* Weekday labels */}
               <div
-                className="absolute flex flex-col gap-[3px]"
-                style={{ left: 0, top: 30 }}
+                className="absolute flex flex-col"
+                style={{ left: 0, top: TOP_PADDING, gap: GAP }}
               >
                 {["", "Mon", "", "Wed", "", "Fri", ""].map((label, i) => (
                   <span
                     key={i}
-                    className="text-[10px] leading-[11px] text-steel"
-                    style={{ height: CELL }}
+                    className="text-[10px] leading-none text-steel"
+                    style={{
+                      height: cell,
+                      display: "flex",
+                      alignItems: "center",
+                    }}
                   >
                     {label}
                   </span>
@@ -170,15 +197,16 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
               </div>
 
               {columns.map((col, i) => (
-                <div key={i} className="flex flex-col gap-[3px]">
+                <div key={i} className="flex flex-col" style={{ gap: GAP }}>
                   {col.cells.map((day, j) =>
                     day ? (
                       <div
                         key={day.date}
-                        className="rounded-[3px] outline-none transition-transform duration-100 focus-visible:ring-2 focus-visible:ring-apple-blue/60"
+                        className="outline-none transition-transform duration-100 focus-visible:ring-2 focus-visible:ring-apple-blue/60"
                         style={{
-                          width: CELL,
-                          height: CELL,
+                          width: cell,
+                          height: cell,
+                          borderRadius: Math.max(3, Math.round(cell * 0.22)),
                           background: LEVELS[levelForCount(day.count)],
                         }}
                         role="img"
@@ -192,7 +220,7 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
                     ) : (
                       <div
                         key={`pad-${i}-${j}`}
-                        style={{ width: CELL, height: CELL }}
+                        style={{ width: cell, height: cell }}
                       />
                     ),
                   )}
