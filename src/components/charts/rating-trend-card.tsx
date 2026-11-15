@@ -159,7 +159,7 @@ export function RatingTrendCard({ history }: { history: RatingHistoryPoint[] }) 
               />
               <Tooltip content={<RatingTooltip />} cursor={{ stroke: "#d6d6d6" }} />
               <Area
-                type="stepAfter"
+                type="linear"
                 dataKey="rating"
                 stroke={ACCENT}
                 strokeWidth={2}
