@@ -222,18 +222,6 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
         )}
       </div>
 
-      {/* Level legend */}
-      <div className="flex items-center justify-end gap-1.5 text-[10px] text-steel">
-        Less
-        {LEVELS.map((color) => (
-          <span
-            key={color}
-            className="inline-block size-[11px] rounded-[3px]"
-            style={{ background: color }}
-          />
-        ))}
-        More
-      </div>
     </Card>
   );
 }
