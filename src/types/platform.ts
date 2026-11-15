@@ -53,6 +53,20 @@ export interface DailyActivity {
   count: number;
 }
 
+/**
+ * Unique problems first solved in one Monday-start week. The current week
+ * can be incomplete; `avgDifficulty` is null for weeks without rated solves.
+ */
+export interface WeeklyActivityPoint {
+  /** ISO day key of the week's Monday, e.g. "2026-11-09". */
+  weekStart: string;
+  count: number;
+  /** Rated problems behind `avgDifficulty` (0 = no average available). */
+  ratedCount: number;
+  avgDifficulty: number | null;
+  isCurrent: boolean;
+}
+
 /** A point of the cumulative unique-solved curve. */
 export interface CumulativePoint {
   date: string;
@@ -90,8 +104,28 @@ export interface DashboardData {
   acceptanceRate: number | null;
   uniqueSolved: number;
   uniqueAttempted: number;
-  solvedThisMonth: number;
-  solvedThisYear: number;
+
+  // --- Recent activity overview -------------------------------------------
+
+  /** Unique problems first solved in the current Monday-start week. */
+  solvedThisWeek: number;
+  /** Unique problems first solved in the equivalent elapsed span of last week. */
+  lastWeekSameElapsed: number;
+  /** Unique problems first solved in the last 30 local calendar days. */
+  solvedLast30Days: number;
+  /** Unique problems first solved in the 30 days before that window. */
+  solvedPrev30Days: number;
+  /** Days of the current week (Mon..today) with at least one first-solve. */
+  activeDaysThisWeek: number;
+  /** Days elapsed in the current week, Monday..today inclusive (1..7). */
+  elapsedDaysThisWeek: number;
+  /** Average rating of rated problems first solved in the last 30 days. */
+  avgDifficultyLast30Days: number | null;
+  /** Same average for the preceding 30-day window. */
+  avgDifficultyPrev30Days: number | null;
+
+  /** Last 8 Monday-start weeks (zero-filled, current week flagged). */
+  weeklyActivity: WeeklyActivityPoint[];
 
   /** Buckets sorted by rating ascending; unrated problems listed separately. */
   ratingDistribution: RatingBucket[];
@@ -107,6 +141,8 @@ export interface DashboardData {
   ratingHistory: RatingHistoryPoint[];
 
   solvedProblems: SolvedProblem[];
+
+  // --- All-time statistics --------------------------------------------------
 
   /** All-time distinct days with at least one first-solve. */
   activeDays: number;

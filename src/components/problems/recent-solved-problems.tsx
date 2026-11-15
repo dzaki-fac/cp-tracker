@@ -3,12 +3,9 @@
 import { useMemo, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
-  ArrowDown,
-  ArrowUp,
   Check,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
+  Clock3,
   ListChecks,
   Search,
   X,
@@ -37,13 +34,12 @@ import {
 import { getRankColor } from "@/lib/cf-rank";
 import { DISPLAY_TIMEZONE } from "@/lib/config";
 import { distinctRatings, distinctTags } from "@/lib/statistics";
-import { cn, formatNumber } from "@/lib/utils";
+import { formatNumber } from "@/lib/utils";
 import type { SolvedProblem } from "@/types/platform";
 
-const PAGE_SIZES = [25, 50, 100];
-
-type SortKey = "date" | "rating";
-type SortDir = "asc" | "desc";
+/** How many recent problems are visible initially, and per "show more". */
+const INITIAL_ROWS = 12;
+const ROWS_STEP = 12;
 
 /** Consistent with the server-side day bucketing timezone (Asia/Jakarta). */
 const DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
@@ -57,14 +53,12 @@ function formatDate(unixSeconds: number): string {
   return DATE_FORMAT.format(new Date(unixSeconds * 1000));
 }
 
-/** Label for the contest column: contest name when known, "Gym" for gyms. */
-function contestLabel(
-  problem: SolvedProblem,
-  contestNames: Record<number, string>,
-): string | null {
+/** "1454B" style contest + index label, "Gym" for gym contests. */
+function problemSource(problem: SolvedProblem): string | null {
   if (problem.contestId == null) return null;
-  if (problem.contestId >= 100000) return "Gym";
-  return contestNames[problem.contestId] ?? `Contest ${problem.contestId}`;
+  const id =
+    problem.contestId >= 100000 ? "Gym" : String(problem.contestId);
+  return problem.index ? `${id} ${problem.index}` : id;
 }
 
 function contestHref(problem: SolvedProblem): string | null {
@@ -74,32 +68,35 @@ function contestHref(problem: SolvedProblem): string | null {
     : `https://codeforces.com/contest/${problem.contestId}`;
 }
 
-interface SolvedProblemsTableProps {
+interface RecentSolvedProblemsProps {
+  /** Unique solved problems, any order — the list sorts newest first. */
   problems: SolvedProblem[];
-  /** contestId → contest name (best effort; "Contest {id}" as fallback). */
-  contestNames?: Record<number, string>;
-  /** Controlled tag selection (union filter), shared with the tag breakdown. */
+  /** Controlled tag selection (union filter), shared with the topic card. */
   selectedTags: string[];
   onTagsChange: (tags: string[]) => void;
 }
 
 /**
- * Searchable, filterable, sortable, paginated list of unique solved problems.
- * Deduplication happens server-side; every row is one unique problem.
+ * Recent Solved Problems — the most recently first-solved unique problems
+ * (one row per problem; duplicates across submissions are already merged
+ * server-side). Defaults to the latest 12 with a "show more" control, and
+ * keeps name search, rating filter and the shared tag multi-select.
  */
-export function SolvedProblemsTable({
+export function RecentSolvedProblems({
   problems,
-  contestNames = {},
   selectedTags = [],
   onTagsChange,
-}: SolvedProblemsTableProps) {
+}: RecentSolvedProblemsProps) {
   const [query, setQuery] = useState("");
   const [ratingFilter, setRatingFilter] = useState("all");
-  const [sortKey, setSortKey] = useState<SortKey>("date");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const [pageSize, setPageSize] = useState(25);
-  const [page, setPage] = useState(1);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_ROWS);
 
+  const recent = useMemo(
+    () =>
+      [...problems]
+        .sort((a, b) => b.firstSolvedAt - a.firstSolvedAt),
+    [problems],
+  );
   const ratings = useMemo(() => distinctRatings(problems), [problems]);
   const tags = useMemo(() => distinctTags(problems), [problems]);
 
@@ -113,7 +110,7 @@ export function SolvedProblemsTable({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return problems.filter((p) => {
+    return recent.filter((p) => {
       if (q && !p.name.toLowerCase().includes(q)) return false;
       if (ratingFilter !== "all" && String(p.rating ?? "unrated") !== ratingFilter)
         return false;
@@ -124,54 +121,25 @@ export function SolvedProblemsTable({
         return false;
       return true;
     });
-  }, [problems, query, ratingFilter, selectedTags]);
+  }, [recent, query, ratingFilter, selectedTags]);
 
-  const sorted = useMemo(() => {
-    const dir = sortDir === "asc" ? 1 : -1;
-    return [...filtered].sort((a, b) => {
-      if (sortKey === "rating") {
-        const ra = a.rating ?? -1;
-        const rb = b.rating ?? -1;
-        if (ra !== rb) return (ra - rb) * dir;
-        return (a.firstSolvedAt - b.firstSolvedAt) * dir;
-      }
-      return (a.firstSolvedAt - b.firstSolvedAt) * dir;
-    });
-  }, [filtered, sortKey, sortDir]);
-
-  const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
-  const safePage = Math.min(page, pageCount);
-  const start = (safePage - 1) * pageSize;
-  const rows = sorted.slice(start, start + pageSize);
-
-  const toggleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir("desc");
-    }
-    setPage(1);
-  };
-
-  const resetPage = () => setPage(1);
-
-  const isEmptyAll = problems.length === 0;
+  const rows = filtered.slice(0, visibleCount);
+  const hasMore = filtered.length > rows.length;
 
   return (
     <Card className="flex flex-col gap-5 p-7">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <ListChecks className="size-4 text-steel" aria-hidden />
-          Solved problems
+          <Clock3 className="size-4 text-steel" aria-hidden />
+          Recent solved problems
         </CardTitle>
         <CardDescription className="numeric">
           {formatNumber(problems.length)} unique problem
-          {problems.length === 1 ? "" : "s"} solved all-time
+          {problems.length === 1 ? "" : "s"} solved all-time · newest first
         </CardDescription>
       </CardHeader>
 
-      {isEmptyAll ? (
+      {problems.length === 0 ? (
         <div className="flex h-32 items-center justify-center text-[14px] text-steel">
           No solved problems yet.
         </div>
@@ -188,7 +156,7 @@ export function SolvedProblemsTable({
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
-                  resetPage();
+                  setVisibleCount(INITIAL_ROWS);
                 }}
                 placeholder="Search by problem name"
                 className="pl-9"
@@ -200,7 +168,7 @@ export function SolvedProblemsTable({
               value={ratingFilter}
               onValueChange={(v) => {
                 setRatingFilter(v);
-                resetPage();
+                setVisibleCount(INITIAL_ROWS);
               }}
             >
               <SelectTrigger className="sm:w-40" aria-label="Filter by rating">
@@ -282,7 +250,7 @@ export function SolvedProblemsTable({
             </DropdownMenu.Root>
           </div>
 
-          {/* Table */}
+          {/* Recent problems table */}
           {rows.length === 0 ? (
             <div className="flex h-32 items-center justify-center text-[14px] text-steel">
               No problems match your filters.
@@ -292,45 +260,15 @@ export function SolvedProblemsTable({
               <TableHeader>
                 <TableRow>
                   <TableHead className="min-w-56">Problem</TableHead>
-                  <TableHead className="text-right">
-                    <button
-                      onClick={() => toggleSort("rating")}
-                      className="inline-flex items-center gap-1 transition-colors hover:text-ink"
-                      aria-label="Sort by rating"
-                    >
-                      Rating
-                      {sortKey === "rating" ? (
-                        sortDir === "asc" ? (
-                          <ArrowUp className="size-3" aria-hidden />
-                        ) : (
-                          <ArrowDown className="size-3" aria-hidden />
-                        )
-                      ) : null}
-                    </button>
-                  </TableHead>
+                  <TableHead className="text-right">Rating</TableHead>
                   <TableHead className="min-w-40">Tags</TableHead>
-                  <TableHead className="min-w-36">Contest</TableHead>
-                  <TableHead>
-                    <button
-                      onClick={() => toggleSort("date")}
-                      className="inline-flex items-center gap-1 transition-colors hover:text-ink"
-                      aria-label="Sort by date first solved"
-                    >
-                      Date solved
-                      {sortKey === "date" ? (
-                        sortDir === "asc" ? (
-                          <ArrowUp className="size-3" aria-hidden />
-                        ) : (
-                          <ArrowDown className="size-3" aria-hidden />
-                        )
-                      ) : null}
-                    </button>
-                  </TableHead>
+                  <TableHead className="min-w-24">Source</TableHead>
+                  <TableHead>Date solved</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rows.map((p) => {
-                  const label = contestLabel(p, contestNames);
+                  const source = problemSource(p);
                   const href = contestHref(p);
                   return (
                     <TableRow key={p.key}>
@@ -384,16 +322,16 @@ export function SolvedProblemsTable({
                           ) : null}
                         </div>
                       </TableCell>
-                      <TableCell className="max-w-44">
-                        {label && href ? (
+                      <TableCell className="max-w-28">
+                        {source && href ? (
                           <a
                             href={href}
                             target="_blank"
                             rel="noopener noreferrer"
-                            aria-label={`Open contest ${label} on Codeforces`}
+                            aria-label={`Open contest ${source} on Codeforces`}
                             className="block max-w-full truncate text-slate hover:text-apple-blue hover:underline underline-offset-2"
                           >
-                            {label}
+                            {source}
                           </a>
                         ) : (
                           <span className="text-steel">—</span>
@@ -409,64 +347,25 @@ export function SolvedProblemsTable({
             </Table>
           )}
 
-          {/* Pagination */}
-          {!isEmptyAll && sorted.length > 0 ? (
+          {/* Show more / footer */}
+          {filtered.length > 0 ? (
             <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
               <p className="numeric text-[12px] leading-4 text-slate">
-                Showing {formatNumber(start + 1)}–
-                {formatNumber(Math.min(start + pageSize, sorted.length))} of{" "}
-                {formatNumber(sorted.length)}
-                {sorted.length !== problems.length
+                Showing {formatNumber(rows.length)} of {formatNumber(filtered.length)}
+                {filtered.length !== problems.length
                   ? ` (of ${formatNumber(problems.length)} total)`
                   : ""}
               </p>
-              <div className="flex items-center gap-3">
-                <Select
-                  value={String(pageSize)}
-                  onValueChange={(v) => {
-                    setPageSize(Number(v));
-                    resetPage();
-                  }}
+              {hasMore ? (
+                <Button
+                  variant="outline"
+                  onClick={() => setVisibleCount((count) => count + ROWS_STEP)}
                 >
-                  <SelectTrigger className="w-[7.5rem]" aria-label="Rows per page">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAGE_SIZES.map((size) => (
-                      <SelectItem key={size} value={String(size)}>
-                        {size} / page
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={safePage <= 1}
-                    aria-label="Previous page"
-                  >
-                    <ChevronLeft className="size-3.5" aria-hidden />
-                  </Button>
-                  <span
-                    className={cn(
-                      "numeric min-w-24 text-center text-[12px] leading-4 text-slate",
-                    )}
-                  >
-                    Page {safePage} of {pageCount}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-                    disabled={safePage >= pageCount}
-                    aria-label="Next page"
-                  >
-                    <ChevronRight className="size-3.5" aria-hidden />
-                  </Button>
-                </div>
-              </div>
+                  <ListChecks className="size-3.5" aria-hidden />
+                  Show {formatNumber(Math.min(ROWS_STEP, filtered.length - rows.length))}{" "}
+                  more
+                </Button>
+              ) : null}
             </div>
           ) : null}
         </>

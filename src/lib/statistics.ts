@@ -2,11 +2,16 @@
  * Statistics: reusable aggregation utilities over the normalized domain types.
  *
  * All day/month/year bucketing uses `DISPLAY_TIMEZONE` (Asia/Jakarta) so
- * "this month" and the heatmap are consistent regardless of server timezone.
+ * "this week", the calendar and the heatmap are consistent regardless of the
+ * server timezone. Weeks start on Monday.
  */
 
 import { DISPLAY_TIMEZONE } from "@/lib/config";
-import type { RatingBucket, SolvedProblem } from "@/types/platform";
+import type {
+  RatingBucket,
+  SolvedProblem,
+  WeeklyActivityPoint,
+} from "@/types/platform";
 
 /** en-CA yields ISO-like day keys ("2026-11-15") — used for stable bucketing. */
 const dayFormatter = new Intl.DateTimeFormat("en-CA", {
@@ -69,36 +74,97 @@ export function dayKeyDiff(a: string, b: string): number {
 }
 
 /**
- * Fill missing rating buckets with count 0 so the difficulty chart shows the
- * complete 100-step range between the lowest and highest rated problem
- * (e.g. 800, 900, … 1800) instead of a sparse set of occupied buckets.
- * Unrated problems are never part of the returned buckets.
+ * Monday-start week: shift a day key back to the Monday of its week.
+ * Sunday (weekday 0) belongs to the week that started six days earlier.
  */
-export function fillRatingBuckets(
-  buckets: RatingBucket[],
-  step = 100,
-): RatingBucket[] {
-  const rated = buckets.filter(
-    (bucket): bucket is RatingBucket & { rating: number } =>
-      bucket.rating != null && bucket.count > 0,
-  );
-  if (rated.length === 0) return [];
+export function weekStartDayKey(dayKey: string): string {
+  const [y, m, d] = dayKey.split("-").map(Number);
+  const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0 = Sunday
+  return dayKeyOffset(dayKey, weekday === 0 ? 6 : weekday - 1);
+}
 
-  // Normalize each rating onto the step grid (nearest bucket) so unusual
-  // non-multiple ratings merge into their bucket instead of being dropped.
-  const counts = new Map<number, number>();
-  for (const bucket of rated) {
-    const rating = Math.round(bucket.rating / step) * step;
-    counts.set(rating, (counts.get(rating) ?? 0) + bucket.count);
+/**
+ * Number of unique problems first solved in the inclusive day-key range
+ * [startDayKey, endDayKey] (display timezone).
+ */
+export function countSolvedInRange(
+  solved: SolvedProblem[],
+  startDayKey: string,
+  endDayKey: string,
+): number {
+  let count = 0;
+  for (const problem of solved) {
+    const key = dayKeyFromUnix(problem.firstSolvedAt);
+    if (key >= startDayKey && key <= endDayKey) count += 1;
   }
-  const min = Math.min(...counts.keys());
-  const max = Math.max(...counts.keys());
+  return count;
+}
 
-  const filled: RatingBucket[] = [];
-  for (let rating = min; rating <= max; rating += step) {
-    filled.push({ rating, count: counts.get(rating) ?? 0 });
+/**
+ * Average Codeforces rating of rated problems in a solved list, null when the
+ * list contains no rated problems (unrated problems are excluded, not zeroed).
+ */
+export function averageDifficulty(solved: SolvedProblem[]): number | null {
+  let sum = 0;
+  let rated = 0;
+  for (const problem of solved) {
+    if (problem.rating != null) {
+      sum += problem.rating;
+      rated += 1;
+    }
   }
-  return filled;
+  return rated > 0 ? Math.round(sum / rated) : null;
+}
+
+/**
+ * Weekly buckets for the last `weeks` weeks (including the current,
+ * possibly incomplete week), oldest first, zero-filled.
+ *
+ * Each bucket counts unique problems first solved Monday..Sunday of that
+ * week, plus the rated-only average difficulty and the number of rated
+ * problems behind that average (0 for a "no data" week).
+ */
+export function buildWeeklyActivity(
+  solved: SolvedProblem[],
+  weeks: number,
+  nowMs: number = Date.now(),
+): WeeklyActivityPoint[] {
+  const today = todayDayKey(nowMs);
+  const currentWeekStart = weekStartDayKey(today);
+  const firstStart = dayKeyOffset(currentWeekStart, (weeks - 1) * 7);
+
+  interface Bucket {
+    count: number;
+    ratingSum: number;
+    ratedCount: number;
+  }
+  const byWeek = new Map<string, Bucket>();
+  for (const problem of solved) {
+    const start = weekStartDayKey(dayKeyFromUnix(problem.firstSolvedAt));
+    if (start < firstStart) continue; // outside the requested window
+    const bucket = byWeek.get(start) ?? { count: 0, ratingSum: 0, ratedCount: 0 };
+    bucket.count += 1;
+    if (problem.rating != null) {
+      bucket.ratingSum += problem.rating;
+      bucket.ratedCount += 1;
+    }
+    byWeek.set(start, bucket);
+  }
+
+  const points: WeeklyActivityPoint[] = [];
+  for (let i = 0; i < weeks; i += 1) {
+    // Walk forward from the oldest week (negative offset = add days).
+    const weekStart = dayKeyOffset(firstStart, -i * 7);
+    const bucket = byWeek.get(weekStart) ?? { count: 0, ratingSum: 0, ratedCount: 0 };
+    points.push({
+      weekStart,
+      count: bucket.count,
+      ratedCount: bucket.ratedCount,
+      avgDifficulty: bucket.ratedCount > 0 ? Math.round(bucket.ratingSum / bucket.ratedCount) : null,
+      isCurrent: weekStart === currentWeekStart,
+    });
+  }
+  return points;
 }
 
 /**
@@ -133,7 +199,7 @@ export function computeStreaks(days: { date: string; count: number }[]): {
   return { current, longest };
 }
 
-/** Index (day count) of unique solved problems per day key. */
+/** Count of unique solved problems per day key. */
 export function countSolvedPerDay(
   solved: SolvedProblem[],
 ): Map<string, number> {
@@ -195,6 +261,39 @@ export function buildRatingDistribution(solved: SolvedProblem[]): {
 }
 
 /**
+ * Fill missing rating buckets with count 0 so the difficulty chart shows the
+ * complete 100-step range between the lowest and highest rated problem
+ * (e.g. 800, 900, … 1800) instead of a sparse set of occupied buckets.
+ * Unrated problems are never part of the returned buckets.
+ */
+export function fillRatingBuckets(
+  buckets: RatingBucket[],
+  step = 100,
+): RatingBucket[] {
+  const rated = buckets.filter(
+    (bucket): bucket is RatingBucket & { rating: number } =>
+      bucket.rating != null && bucket.count > 0,
+  );
+  if (rated.length === 0) return [];
+
+  // Normalize each rating onto the step grid (nearest bucket) so unusual
+  // non-multiple ratings merge into their bucket instead of being dropped.
+  const counts = new Map<number, number>();
+  for (const bucket of rated) {
+    const rating = Math.round(bucket.rating / step) * step;
+    counts.set(rating, (counts.get(rating) ?? 0) + bucket.count);
+  }
+  const min = Math.min(...counts.keys());
+  const max = Math.max(...counts.keys());
+
+  const filled: RatingBucket[] = [];
+  for (let rating = min; rating <= max; rating += step) {
+    filled.push({ rating, count: counts.get(rating) ?? 0 });
+  }
+  return filled;
+}
+
+/**
  * Cumulative unique-solved series: one point per calendar day from the first
  * solve through today (in the display timezone), ascending, where `total`
  * includes every solve up to and including that day. Days without solves are
@@ -216,43 +315,6 @@ export function buildCumulativeSeries(
     total += counts.get(date) ?? 0;
     return { date, total };
   });
-}
-
-/** Number of unique problems first solved within the current calendar month. */
-export function countSolvedThisMonth(
-  solved: SolvedProblem[],
-  nowMs: number = Date.now(),
-): number {
-  const currentMonth = monthKeyFromDayKey(todayDayKey(nowMs));
-  return countSolvedInMonthKeys(solved, currentMonth);
-}
-
-function countSolvedInMonthKeys(
-  solved: SolvedProblem[],
-  currentMonth: string,
-): number {
-  let count = 0;
-  for (const problem of solved) {
-    if (monthKeyFromDayKey(dayKeyFromUnix(problem.firstSolvedAt)) === currentMonth) {
-      count += 1;
-    }
-  }
-  return count;
-}
-
-/** Number of unique problems first solved within the current calendar year. */
-export function countSolvedThisYear(
-  solved: SolvedProblem[],
-  nowMs: number = Date.now(),
-): number {
-  const currentYear = todayDayKey(nowMs).slice(0, 4);
-  let count = 0;
-  for (const problem of solved) {
-    if (dayKeyFromUnix(problem.firstSolvedAt).startsWith(currentYear)) {
-      count += 1;
-    }
-  }
-  return count;
 }
 
 /** Distinct difficulty ratings present in a solved list, ascending. */

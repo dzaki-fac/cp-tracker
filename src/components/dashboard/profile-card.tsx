@@ -1,56 +1,46 @@
 import { ArrowUpRight } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { PlatformAvatar } from "@/components/dashboard/platform-avatar";
 import { getRankColorByName } from "@/lib/cf-rank";
-import type { PlatformIdentity } from "@/types/platform";
 import { formatNumber } from "@/lib/utils";
-
-function formatMemberSince(unixSeconds: number): string {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "long",
-    year: "numeric",
-  }).format(new Date(unixSeconds * 1000));
-}
+import type { PlatformIdentity } from "@/types/platform";
 
 /**
- * Profile card — identity, rating summary and a link to the upstream profile.
- * Presentation only: all platform data arrives normalized via PlatformIdentity.
- * Rank labels are tinted with the official Codeforces rank colors.
+ * Compact profile header — identity, rating summary and a link to the
+ * upstream profile in a single quiet row, giving recent activity the visual
+ * focus of the page. Rank labels are tinted with the Codeforces rank colors.
  */
 export function ProfileCard({ profile }: { profile: PlatformIdentity }) {
   const currentRankColor = getRankColorByName(profile.rankCurrent);
-  const maxRankColor = getRankColorByName(profile.rankMax);
 
   return (
-    <Card className="flex h-full flex-col gap-6 p-7 sm:flex-row sm:items-center">
+    <Card className="flex items-center gap-4 px-5 py-4 sm:gap-5 sm:px-6">
       <PlatformAvatar
         src={profile.avatarUrl}
         handle={profile.handle}
-        className="size-24"
+        className="size-12 shrink-0 sm:size-14"
       />
 
-      <div className="flex min-w-0 flex-1 flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <h2 className="font-display truncate text-[40px] leading-none font-semibold text-ink">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
+          <h2 className="font-display truncate text-[22px] leading-[1.2] font-semibold text-ink">
             {profile.handle}
           </h2>
           {profile.rankCurrent ? (
-            <Badge
-              variant="outline"
-              className="mt-1.5 capitalize"
+            <span
+              className="text-[13px] leading-[1.2] font-medium capitalize"
               style={currentRankColor ? { color: currentRankColor } : undefined}
             >
               {profile.rankCurrent}
-            </Badge>
+            </span>
           ) : null}
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[14px] leading-[1.29] text-slate">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[13px] leading-[1.35] text-slate">
           {profile.ratingCurrent != null ? (
             <span className="numeric">
-              <span className="text-steel">Current rating </span>
+              <span className="text-steel">Rating </span>
               <span className="font-medium text-ink">
                 {formatNumber(profile.ratingCurrent)}
               </span>
@@ -61,40 +51,34 @@ export function ProfileCard({ profile }: { profile: PlatformIdentity }) {
           {profile.ratingMax != null ? (
             <span className="numeric">
               <span className="text-steel">Max </span>
-              <span className="font-medium text-ink">
-                {formatNumber(profile.ratingMax)}
-              </span>
+              {formatNumber(profile.ratingMax)}
             </span>
           ) : null}
           {profile.rankMax ? (
-            <span>
+            <span className="hidden sm:inline">
               <span className="text-steel">Max rank </span>
               <span
                 className="font-medium capitalize"
-                style={maxRankColor ? { color: maxRankColor } : undefined}
+                style={
+                  getRankColorByName(profile.rankMax)
+                    ? { color: getRankColorByName(profile.rankMax) }
+                    : undefined
+                }
               >
                 {profile.rankMax}
               </span>
             </span>
           ) : null}
-          {profile.memberSince ? (
-            <span>
-              <span className="text-steel">Member since </span>
-              {formatMemberSince(profile.memberSince)}
-            </span>
-          ) : null}
+          <a
+            href={profile.profileUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-0.5 text-apple-blue transition-colors hover:underline underline-offset-2"
+          >
+            Codeforces profile
+            <ArrowUpRight className="size-3.5" aria-hidden />
+          </a>
         </div>
-
-        <a
-          href={profile.profileUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-[14px] leading-[1.29] text-apple-blue transition-colors hover:underline underline-offset-2"
-        >
-          View profile on{" "}
-          {profile.platform === "codeforces" ? "Codeforces" : profile.platform}
-          <ArrowUpRight className="size-3.5" aria-hidden />
-        </a>
       </div>
     </Card>
   );

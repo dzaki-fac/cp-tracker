@@ -26,20 +26,26 @@ import {
   ACCEPTED_VERDICT,
 } from "@/lib/codeforces/parser";
 import {
+  averageDifficulty,
   buildCumulativeSeries,
   buildDailyActivity,
   buildRatingDistribution,
+  buildWeeklyActivity,
   computeStreaks,
-  countSolvedThisMonth,
-  countSolvedThisYear,
+  countSolvedInRange,
   dayKeyDiff,
   dayKeyFromUnix,
+  dayKeyOffset,
   todayDayKey,
+  weekStartDayKey,
 } from "@/lib/statistics";
 import type { DashboardData } from "@/types/platform";
 
 /** How long a freshly-fetched dashboard payload is served without refetching. */
 const TTL_MS = Math.max(60, CACHE_TTL_SECONDS) * 1000;
+
+/** Weekly buckets rendered by the Weekly Performance chart. */
+const WEEKLY_WINDOW = 8;
 
 interface CachedPayload {
   data: DashboardData;
@@ -65,11 +71,35 @@ function aggregate(parts: {
     (s) => s.verdict === ACCEPTED_VERDICT,
   ).length;
 
-  const activity = buildDailyActivity(solved, 365);
-  const distribution = buildRatingDistribution(solved);
   const nowMs = Date.now();
+  const today = todayDayKey(nowMs);
 
-  // All-time activity metrics: distinct active days, streaks and averages.
+  // --- Recent activity windows (display timezone, inclusive bounds) ---------
+  const weekStart = weekStartDayKey(today);
+  const elapsedDaysThisWeek = Math.min(7, dayKeyDiff(weekStart, today) + 1);
+
+  // Last week's equivalent elapsed span: last Monday .. last Mon + elapsed-1.
+  const lastWeekStart = dayKeyOffset(weekStart, 7);
+  const lastWeekElapsedEnd = dayKeyOffset(
+    lastWeekStart,
+    -(elapsedDaysThisWeek - 1),
+  );
+
+  const last30Start = dayKeyOffset(today, 29);
+  const prev30Start = dayKeyOffset(today, 59);
+  const prev30End = dayKeyOffset(today, 30);
+
+  const inLast30 = solved.filter(
+    (p) => dayKeyFromUnix(p.firstSolvedAt) >= last30Start,
+  );
+  const inPrev30 = solved.filter((p) => {
+    const key = dayKeyFromUnix(p.firstSolvedAt);
+    return key >= prev30Start && key <= prev30End;
+  });
+
+  const activity365 = buildDailyActivity(solved, 365, nowMs);
+
+  // --- All-time activity metrics -------------------------------------------
   let activeDays = 0;
   let currentStreakDays = 0;
   let longestStreakDays = 0;
@@ -77,9 +107,12 @@ function aggregate(parts: {
     const firstKey = dayKeyFromUnix(
       Math.min(...solved.map((problem) => problem.firstSolvedAt)),
     );
-    const span = Math.max(1, dayKeyDiff(firstKey, todayDayKey(nowMs)) + 1);
+    const span = Math.max(1, dayKeyDiff(firstKey, today) + 1);
     const allDays = buildDailyActivity(solved, span, nowMs).days;
-    activeDays = allDays.reduce((count, day) => (day.count > 0 ? count + 1 : count), 0);
+    activeDays = allDays.reduce(
+      (count, day) => (day.count > 0 ? count + 1 : count),
+      0,
+    );
     const streaks = computeStreaks(allDays);
     currentStreakDays = streaks.current;
     longestStreakDays = streaks.longest;
@@ -88,6 +121,15 @@ function aggregate(parts: {
     activeDays > 0
       ? Math.round((solved.length / activeDays) * 10) / 10
       : null;
+
+  const distribution = buildRatingDistribution(solved);
+
+  // Active days within the elapsed span of the current week.
+  const weekDays = activity365.days.slice(-elapsedDaysThisWeek);
+  const activeDaysThisWeek = weekDays.reduce(
+    (count, day) => (day.count > 0 ? count + 1 : count),
+    0,
+  );
 
   return {
     platform: "codeforces",
@@ -104,14 +146,27 @@ function aggregate(parts: {
         : null,
     uniqueSolved: solved.length,
     uniqueAttempted: attempted.size,
-    solvedThisMonth: countSolvedThisMonth(solved, nowMs),
-    solvedThisYear: countSolvedThisYear(solved, nowMs),
+
+    solvedThisWeek: countSolvedInRange(solved, weekStart, today),
+    lastWeekSameElapsed: countSolvedInRange(
+      solved,
+      lastWeekStart,
+      lastWeekElapsedEnd,
+    ),
+    solvedLast30Days: inLast30.length,
+    solvedPrev30Days: inPrev30.length,
+    activeDaysThisWeek,
+    elapsedDaysThisWeek,
+    avgDifficultyLast30Days: averageDifficulty(inLast30),
+    avgDifficultyPrev30Days: averageDifficulty(inPrev30),
+
+    weeklyActivity: buildWeeklyActivity(solved, WEEKLY_WINDOW, nowMs),
 
     ratingDistribution: distribution.buckets,
     unratedSolved: distribution.unrated,
 
-    activity: activity.days,
-    activityTotal: activity.total,
+    activity: activity365.days,
+    activityTotal: activity365.total,
 
     cumulative: buildCumulativeSeries(solved, nowMs),
 

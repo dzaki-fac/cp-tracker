@@ -1,19 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  averageDifficulty,
   buildCumulativeSeries,
   buildDailyActivity,
   buildRatingDistribution,
+  buildWeeklyActivity,
   computeStreaks,
+  countSolvedInRange,
   countSolvedPerDay,
-  countSolvedThisMonth,
-  countSolvedThisYear,
   dayKeyDiff,
   dayKeyFromUnix,
   dayKeyOffset,
   dayKeyRange,
   fillRatingBuckets,
   monthKeyFromDayKey,
+  weekStartDayKey,
 } from "@/lib/statistics";
 import type { SolvedProblem } from "@/types/platform";
 
@@ -33,6 +35,12 @@ function solved(
     firstSolvedAt,
     url: null,
   };
+}
+
+/** Day key -> unix seconds at 10:00 UTC on that day (safe in Jakarta). */
+function at10Utc(dayKey: string): number {
+  const [y, m, d] = dayKey.split("-").map(Number);
+  return Date.UTC(y, m - 1, d, 10) / 1000;
 }
 
 describe("day bucketing (Asia/Jakarta)", () => {
@@ -72,6 +80,105 @@ describe("day bucketing (Asia/Jakarta)", () => {
     expect(dayKeyDiff("2025-01-31", "2025-02-01")).toBe(1);
     expect(dayKeyDiff("2025-02-01", "2025-01-31")).toBe(-1);
     expect(dayKeyDiff("2025-11-10", "2025-11-15")).toBe(5);
+  });
+});
+
+describe("weekStartDayKey (Monday-start weeks)", () => {
+  it("maps every weekday of a week to the same Monday", () => {
+    // 2025-11-10 is a Monday; 2025-11-16 is its Sunday.
+    expect(weekStartDayKey("2025-11-10")).toBe("2025-11-10");
+    expect(weekStartDayKey("2025-11-12")).toBe("2025-11-10");
+    expect(weekStartDayKey("2025-11-16")).toBe("2025-11-10");
+  });
+
+  it("treats Sunday as the last day of the previous week, not the next", () => {
+    // 2025-11-16 (Sunday) → Monday 2025-11-10, not 2025-11-17.
+    expect(weekStartDayKey("2025-11-16")).toBe("2025-11-10");
+    // Monday itself is unchanged.
+    expect(weekStartDayKey("2025-11-17")).toBe("2025-11-17");
+  });
+
+  it("wraps backwards across month and year boundaries", () => {
+    // 2026-03-01 is a Sunday → its Monday is 2026-02-23.
+    expect(weekStartDayKey("2026-03-01")).toBe("2026-02-23");
+    // 2025-01-01 is a Wednesday → Monday 2024-12-30.
+    expect(weekStartDayKey("2025-01-01")).toBe("2024-12-30");
+  });
+});
+
+describe("countSolvedInRange / averageDifficulty", () => {
+  it("counts unique problems inside an inclusive day-key range", () => {
+    const problems = [
+      solved("A", at10Utc("2025-11-10")),
+      solved("B", at10Utc("2025-11-12")),
+      solved("C", at10Utc("2025-11-15")),
+    ];
+    expect(countSolvedInRange(problems, "2025-11-10", "2025-11-12")).toBe(2);
+    expect(countSolvedInRange(problems, "2025-11-11", "2025-11-15")).toBe(2);
+    expect(countSolvedInRange(problems, "2025-11-13", "2025-11-14")).toBe(0);
+  });
+
+  it("averages only rated problems and rounds to an integer", () => {
+    const problems = [
+      solved("A", 1, 1000),
+      solved("B", 2, 1201),
+      solved("C", 3, null),
+    ];
+    // (1000 + 1201) / 2 = 1100.5 → 1101 (rounded), unrated ignored.
+    expect(averageDifficulty(problems)).toBe(1101);
+  });
+
+  it("returns null when there are no rated problems", () => {
+    expect(averageDifficulty([solved("A", 1, null)])).toBeNull();
+    expect(averageDifficulty([])).toBeNull();
+  });
+});
+
+describe("buildWeeklyActivity (Monday-start buckets)", () => {
+  it("zero-fills weeks and sums counts per Monday-start week", () => {
+    // "Now": 2025-11-15 (a Saturday), so the current week started Mon 11-10.
+    const now = Date.UTC(2025, 10, 15, 3, 0); // 10:00 Jakarta
+    const weeks = buildWeeklyActivity(
+      [
+        solved("A", at10Utc("2025-11-11")),
+        solved("B", at10Utc("2025-11-12")),
+        solved("C", at10Utc("2025-11-09")), // previous week (Mon 11-03)
+      ],
+      3,
+      now,
+    );
+
+    expect(weeks.map((w) => w.weekStart)).toEqual([
+      "2025-10-27",
+      "2025-11-03",
+      "2025-11-10",
+    ]);
+    expect(weeks.map((w) => w.count)).toEqual([0, 1, 2]);
+    expect(weeks[2].isCurrent).toBe(true);
+    expect(weeks[1].isCurrent).toBe(false);
+  });
+
+  it("tracks the rated-only average difficulty per week", () => {
+    const now = Date.UTC(2025, 10, 15, 3, 0);
+    const weeks = buildWeeklyActivity(
+      [
+        solved("A", at10Utc("2025-11-10"), 1000),
+        solved("B", at10Utc("2025-11-11"), 1201),
+        solved("C", at10Utc("2025-11-12"), null), // unrated: ignored
+        solved("D", at10Utc("2025-11-04"), null), // prev week: ratedCount 0
+      ],
+      2,
+      now,
+    );
+
+    const current = weeks[1];
+    expect(current.avgDifficulty).toBe(1101);
+    expect(current.ratedCount).toBe(2);
+
+    const previous = weeks[0];
+    expect(previous.count).toBe(1);
+    expect(previous.ratedCount).toBe(0);
+    expect(previous.avgDifficulty).toBeNull(); // missing data, not zero
   });
 });
 
@@ -241,42 +348,5 @@ describe("buildRatingDistribution", () => {
       solved("C", 3, 1100),
     ]);
     expect(buckets.map((b) => b.rating)).toEqual([800, 1100, 1400]);
-  });
-});
-
-describe("period counts", () => {
-  // 2026-03-15 10:00 Jakarta.
-  const now = Date.UTC(2026, 2, 15, 3, 0);
-
-  it("counts first-solves inside the current month", () => {
-    const inMonth = Date.UTC(2026, 2, 5, 10, 0) / 1000; // Jakarta: Mar 5
-    const sameMonthLate = Date.UTC(2026, 2, 20, 18, 0) / 1000; // Jakarta: Mar 20 (future)
-    const februaryUtc = Date.UTC(2026, 1, 28, 20, 0) / 1000; // Jakarta: Mar 1 03:00 — counts!
-    const februaryUtcBeforeMidnight = Date.UTC(2026, 1, 28, 16, 30) / 1000; // Jakarta: Feb 28 23:30 — does not count
-
-    expect(
-      countSolvedThisMonth(
-        [
-          solved("A", inMonth),
-          solved("B", sameMonthLate),
-          solved("C", februaryUtc),
-          solved("D", februaryUtcBeforeMidnight),
-        ],
-        now,
-      ),
-    ).toBe(3); // A, B, and C — UTC-February submissions can still land in March
-  });
-
-  it("counts first-solves inside the current year", () => {
-    const inYear = Date.UTC(2026, 0, 1, 2, 0) / 1000; // Jan 1, 2026
-    const prevYearEnd = Date.UTC(2025, 11, 31, 17, 0) / 1000; // Dec 31 17:00 UTC → Jan 1 Jakarta
-    const prevYear = Date.UTC(2025, 5, 1, 0, 0) / 1000;
-
-    expect(
-      countSolvedThisYear(
-        [solved("A", inYear), solved("B", prevYearEnd), solved("C", prevYear)],
-        now,
-      ),
-    ).toBe(2);
   });
 });

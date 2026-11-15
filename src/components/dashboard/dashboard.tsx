@@ -1,22 +1,30 @@
 import { CodeforcesApiError } from "@/lib/codeforces/api";
 import { getDashboardData } from "@/lib/dashboard";
 
+import { ActivityCalendar } from "@/components/charts/activity-calendar";
+import { CumulativeProgressChart } from "@/components/charts/cumulative-progress-chart";
+import { RatingTrendCard } from "@/components/charts/rating-trend-card";
+import { WeeklyPerformanceChart } from "@/components/charts/weekly-performance-chart";
+import { AllTimeStats } from "@/components/dashboard/all-time-stats";
 import { DashboardError } from "@/components/dashboard/dashboard-error";
 import { FreshnessBar } from "@/components/dashboard/freshness-bar";
-import { InsightsSection } from "@/components/dashboard/insights-section";
+import { PracticeSection } from "@/components/dashboard/practice-section";
 import { ProfileCard } from "@/components/dashboard/profile-card";
-import { StatsGrid } from "@/components/dashboard/stats-grid";
-import { RatingTrendCard } from "@/components/charts/rating-trend-card";
+import { RecentOverview } from "@/components/dashboard/recent-overview";
 
 /**
  * Server component: fetches the normalized dashboard payload and composes
- * the presentation sections. All platform-specific logic stays behind
- * `lib/codeforces` — the sections below consume generic domain types.
+ * the redesigned training-tracker layout, in this exact order:
  *
- * Layout: white bands for the identity/overview chapters, then a full-bleed
- * Studio Mist band for the insights chapter (charts + table), per DESIGN.md.
- * Each section manages its own centered container so backgrounds can span
- * the full viewport width on large screens.
+ *   1. Profile header (compact)      6. Difficulty progress
+ *   2. Recent activity overview      7. Topic breakdown
+ *   3. 30-day activity calendar      8. Recent solved problems
+ *   4. Weekly performance            9. All-time statistics
+ *   5. Problem solving progress     10. Rating progression
+ *
+ * Layout: white bands for the personal "training" chapters, then a full-bleed
+ * Studio Mist band for the deeper data chapters, per DESIGN.md. Each section
+ * manages its own centered container so backgrounds can span the viewport.
  */
 export default async function Dashboard() {
   let data;
@@ -32,47 +40,65 @@ export default async function Dashboard() {
 
   const { profile, stale } = data;
 
-  // Best-effort contest name map for the table's Contest column (rated
-  // contests come from the rating history; unrated ones fall back to the id).
-  const contestNames: Record<number, string> = {};
-  for (const point of data.ratingHistory) {
-    if (point.contestId != null) contestNames[point.contestId] = point.contestName;
-  }
-
   return (
     <div>
-      {/* Identity & overview band — gallery white */}
+      {/* Personal training band — gallery white */}
       <section
-        aria-label="Profile and overview"
-        className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-5 py-10 sm:px-6 lg:px-10 lg:py-14"
+        aria-label="Recent training activity"
+        className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-5 py-8 sm:px-6 lg:px-10 lg:py-12"
       >
-        <div className="flex flex-col gap-3">
-          <FreshnessBar ageMs={ageMs} stale={stale} />
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-            <div className="lg:col-span-2">
-              <ProfileCard profile={profile} />
-            </div>
-            <RatingTrendCard history={data.ratingHistory} />
-          </div>
-        </div>
+        <FreshnessBar ageMs={ageMs} stale={stale} />
 
-        <section aria-label="Overview statistics">
-          <StatsGrid data={data} />
+        {/* 1. Profile header (compact) */}
+        <ProfileCard profile={profile} />
+
+        {/* 2. Recent Activity Overview */}
+        <section aria-label="Recent activity overview">
+          <RecentOverview data={data} />
+        </section>
+
+        {/* 3 + 4. Calendar and weekly performance side by side on desktop */}
+        <section
+          aria-label="Activity calendar and weekly performance"
+          className="grid grid-cols-1 gap-5 lg:grid-cols-2"
+        >
+          <ActivityCalendar
+            activity={data.activity}
+            solvedProblems={data.solvedProblems}
+          />
+          <WeeklyPerformanceChart
+            weeks={data.weeklyActivity}
+            currentStreakDays={data.currentStreakDays}
+          />
+        </section>
+
+        {/* 5. Problem solving progress */}
+        <section aria-label="Problem solving progress">
+          <CumulativeProgressChart series={data.cumulative} />
         </section>
       </section>
 
-      {/* Insights band — full-bleed Studio Mist */}
-      <section aria-label="Insights" className="w-full bg-studio-mist">
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-5 py-12 sm:px-6 lg:px-10">
-          <InsightsSection
-            buckets={data.ratingDistribution}
-            unrated={data.unratedSolved}
-            cumulative={data.cumulative}
-            activity={data.activity}
+      {/* Deeper data band — full-bleed Studio Mist */}
+      <section aria-label="Practice insights" className="w-full bg-studio-mist">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-5 py-10 sm:px-6 lg:px-10">
+          <PracticeSection
+            weeklyActivity={data.weeklyActivity}
             solvedProblems={data.solvedProblems}
-            contestNames={contestNames}
+            activity={data.activity}
           />
         </div>
+      </section>
+
+      {/* All-time & rating band — gallery white, quiet by design */}
+      <section
+        aria-label="All-time statistics and rating"
+        className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-5 py-10 sm:px-6 lg:px-10 lg:py-14"
+      >
+        {/* 9. All-Time Statistics */}
+        <AllTimeStats data={data} />
+
+        {/* 10. Rating progression */}
+        <RatingTrendCard history={data.ratingHistory} />
       </section>
     </div>
   );
