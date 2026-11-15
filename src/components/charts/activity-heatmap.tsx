@@ -3,8 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Flame } from "lucide-react";
 
-import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { computeStreaks } from "@/lib/statistics";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDayKey, formatNumber } from "@/lib/utils";
 import type { DailyActivity } from "@/types/platform";
 
@@ -52,8 +51,6 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
 
-  const streaks = useMemo(() => computeStreaks(days), [days]);
-
   // Start with the most recent days visible when the grid overflows.
   useEffect(() => {
     const container = containerRef.current;
@@ -73,27 +70,20 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
     if (leading > 0) current = new Array(leading).fill(null);
 
     let lastMonth = "";
-    let firstLabelDone = false;
     for (const day of days) {
       current.push(day);
       if (current.length === 7) {
         const firstCell = current.find(Boolean) as DailyActivity;
         const month = firstCell.date.slice(5, 7);
         if (month !== lastMonth) {
-          const year = firstCell.date.slice(0, 4);
           const monthName = new Intl.DateTimeFormat("en-US", {
             month: "short",
             timeZone: "UTC",
           }).format(new Date(`${firstCell.date}T00:00:00Z`));
-          // 11px+ labels; January and the first label carry the year.
           cols.push({
             cells: current,
-            monthLabel:
-              !firstLabelDone || month === "01"
-                ? `${monthName} ${year}`
-                : monthName,
+            monthLabel: monthName,
           });
-          firstLabelDone = true;
         } else {
           cols.push({ cells: current });
         }
@@ -135,11 +125,6 @@ export function ActivityHeatmap({ days }: { days: DailyActivity[] }) {
           <Flame className="size-4 text-steel" aria-hidden />
           Activity
         </CardTitle>
-        <CardDescription className="numeric">
-          Current streak: {formatNumber(streaks.current)} day
-          {streaks.current === 1 ? "" : "s"} · Longest:{" "}
-          {formatNumber(streaks.longest)} day{streaks.longest === 1 ? "" : "s"}
-        </CardDescription>
       </CardHeader>
 
       <div ref={containerRef} className="relative overflow-x-auto pb-1">
