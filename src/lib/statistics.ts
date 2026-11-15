@@ -156,12 +156,16 @@ export function buildWeeklyActivity(
     // Walk forward from the oldest week (negative offset = add days).
     const weekStart = dayKeyOffset(firstStart, -i * 7);
     const bucket = byWeek.get(weekStart) ?? { count: 0, ratingSum: 0, ratedCount: 0 };
+    const isCurrent = weekStart === currentWeekStart;
+    // In progress until the week's Sunday (weekStart + 6) has been reached.
+    const inProgress = isCurrent && today < dayKeyOffset(weekStart, -6);
     points.push({
       weekStart,
       count: bucket.count,
       ratedCount: bucket.ratedCount,
       avgDifficulty: bucket.ratedCount > 0 ? Math.round(bucket.ratingSum / bucket.ratedCount) : null,
-      isCurrent: weekStart === currentWeekStart,
+      isCurrent,
+      inProgress,
     });
   }
   return points;

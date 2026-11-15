@@ -74,6 +74,7 @@ export default async function Dashboard() {
           <WeeklyPerformanceChart
             weeks={data.weeklyActivity}
             currentStreakDays={data.currentStreakDays}
+            lastWeekSameElapsed={data.lastWeekSameElapsed}
           />
         </section>
 

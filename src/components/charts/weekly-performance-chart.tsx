@@ -32,7 +32,7 @@ interface WeekPoint {
   weekStart: string;
   label: string;
   count: number;
-  isCurrent: boolean;
+  inProgress: boolean;
 }
 
 function WeekTooltip({ active, payload }: ChartTooltipProps) {
@@ -48,7 +48,7 @@ function WeekTooltip({ active, payload }: ChartTooltipProps) {
       <ChartTooltipValue>
         {formatNumber(point.count)} solved
       </ChartTooltipValue>
-      {point.isCurrent ? (
+      {point.inProgress ? (
         <div className="text-steel">Week in progress</div>
       ) : null}
     </ChartTooltipFrame>
@@ -74,44 +74,52 @@ function CountLabel(props: { x?: number; y?: number; value?: unknown }) {
   );
 }
 
-/** "Nov 3" style short label for a Monday week start. */
+/** "Nov 9" style short label for a Monday week start. */
 function shortWeekLabel(dayKey: string): string {
-  const date = new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     timeZone: "UTC",
   }).format(new Date(`${dayKey}T00:00:00Z`));
-  return date;
+}
+
+interface WeeklyPerformanceChartProps {
+  weeks: WeeklyActivityPoint[];
+  currentStreakDays: number;
+  /** Last week's count over the same elapsed span (fair baseline). */
+  lastWeekSameElapsed: number;
 }
 
 /**
  * Weekly Performance — unique problems first solved per week over the last
- * 8 weeks (Monday-start). The current (possibly incomplete) week is visually
- * distinguished; its tooltip notes that the week is still in progress so it
- * is never compared as if it were a completed week.
+ * 8 weeks (Monday-start). The current week is highlighted in blue; while it
+ * is still in progress the summary compares it with the equivalent elapsed
+ * span of last week, never with the full week, so the comparison stays fair.
  */
 export function WeeklyPerformanceChart({
   weeks,
   currentStreakDays,
-}: {
-  weeks: WeeklyActivityPoint[];
-  currentStreakDays: number;
-}) {
+  lastWeekSameElapsed,
+}: WeeklyPerformanceChartProps) {
   const data = useMemo<WeekPoint[]>(
     () =>
       weeks.map((week) => ({
         weekStart: week.weekStart,
         label: shortWeekLabel(week.weekStart),
         count: week.count,
-        isCurrent: week.isCurrent,
+        inProgress: week.inProgress,
       })),
     [weeks],
   );
 
   const current = weeks.find((w) => w.isCurrent);
   const previous = weeks.filter((w) => !w.isCurrent).at(-1);
-  const wow =
-    current != null && previous != null ? current.count - previous.count : null;
+  const inProgress = current?.inProgress ?? false;
+
+  // Fair baseline: while the current week is incomplete, compare with the
+  // same span of last week instead of its full total.
+  const lastWeekBaseline = inProgress ? lastWeekSameElapsed : previous?.count ?? 0;
+  const wow = current != null ? current.count - lastWeekBaseline : null;
 
   const maxCount = data.reduce((max, point) => Math.max(max, point.count), 0);
   const yTop = Math.max(1, Math.ceil(maxCount / 2) * 2);
@@ -126,9 +134,12 @@ export function WeeklyPerformanceChart({
         <CardDescription>Unique problems first solved per week</CardDescription>
       </CardHeader>
 
-      <div className="h-48 w-full">
+      {/* Explicit height: percentage-height ResponsiveContainer needs a
+          definite parent height (min-h-0 flex-1 collapses to 0 inside an
+          auto-height card). */}
+      <div className="h-56 w-full py-1">
         {data.every((point) => point.count === 0) ? (
-          <div className="flex h-full items-center justify-center text-[14px] text-steel">
+          <div className="flex h-full min-h-40 items-center justify-center rounded-[10px] text-[14px] text-steel">
             No weekly activity yet.
           </div>
         ) : (
@@ -140,13 +151,13 @@ export function WeeklyPerformanceChart({
               <CartesianGrid vertical={false} stroke="#e6e6e8" />
               <XAxis
                 dataKey="label"
-                tick={{ fontSize: 11, fill: "#707070" }}
+                tick={{ fontSize: 10, fill: "#707070" }}
                 tickLine={false}
                 axisLine={{ stroke: "#d6d6d6" }}
                 interval={0}
-                angle={data.length > 5 ? -35 : 0}
-                textAnchor={data.length > 5 ? "end" : "middle"}
-                height={data.length > 5 ? 30 : 20}
+                angle={-35}
+                textAnchor="end"
+                height={32}
               />
               <YAxis
                 domain={[0, yTop]}
@@ -168,7 +179,7 @@ export function WeeklyPerformanceChart({
                 {data.map((point) => (
                   <Cell
                     key={point.weekStart}
-                    fill={point.isCurrent ? ACCENT : MUTED}
+                    fill={point.inProgress || point.weekStart === current?.weekStart ? ACCENT : MUTED}
                   />
                 ))}
                 <LabelList dataKey="count" content={<CountLabel />} />
@@ -179,7 +190,7 @@ export function WeeklyPerformanceChart({
       </div>
 
       {/* Compact week-over-week summary */}
-      <div className="mt-auto grid grid-cols-3 gap-3 border-t border-hairline-silver pt-4">
+      <div className="grid grid-cols-3 gap-3 border-t border-hairline-silver pt-4">
         <div className="flex flex-col gap-0.5">
           <span className="text-[11px] leading-4 text-steel">This week</span>
           <span className="numeric text-[15px] leading-[1.2] font-semibold text-ink">
@@ -187,10 +198,17 @@ export function WeeklyPerformanceChart({
           </span>
         </div>
         <div className="flex flex-col gap-0.5">
-          <span className="text-[11px] leading-4 text-steel">Last week</span>
-          <span className="numeric text-[15px] leading-[1.2] font-semibold text-ink">
-            {formatNumber(previous?.count ?? 0)}
+          <span className="text-[11px] leading-4 text-steel">
+            Last week{inProgress ? " · same span" : ""}
           </span>
+          <span className="numeric text-[15px] leading-[1.2] font-semibold text-ink">
+            {formatNumber(lastWeekBaseline)}
+          </span>
+          {!inProgress ? null : (
+            <span className="numeric text-[11px] leading-4 text-steel">
+              full week: {formatNumber(previous?.count ?? 0)}
+            </span>
+          )}
         </div>
         <div className="flex flex-col gap-0.5">
           <span className="text-[11px] leading-4 text-steel">Change</span>
@@ -216,12 +234,11 @@ export function WeeklyPerformanceChart({
         </div>
       </div>
 
-      {current != null && current.isCurrent ? (
-        <p className="text-[12px] leading-4 text-steel">
-          The blue bar is the current week (still in progress) — streak:{" "}
-          {formatNumber(currentStreakDays)} day{currentStreakDays === 1 ? "" : "s"}
-        </p>
-      ) : null}
+      <p className="text-[12px] leading-4 text-steel">
+        {inProgress
+          ? `The blue bar is the current week (still in progress) — streak: ${formatNumber(currentStreakDays)} day${currentStreakDays === 1 ? "" : "s"}`
+          : `Current streak: ${formatNumber(currentStreakDays)} day${currentStreakDays === 1 ? "" : "s"}`}
+      </p>
     </Card>
   );
 }

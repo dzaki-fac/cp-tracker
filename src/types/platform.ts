@@ -54,8 +54,9 @@ export interface DailyActivity {
 }
 
 /**
- * Unique problems first solved in one Monday-start week. The current week
- * can be incomplete; `avgDifficulty` is null for weeks without rated solves.
+ * Unique problems first solved in one Monday-start week. `inProgress` marks
+ * the current week before its Sunday — comparisons against it must use the
+ * equivalent elapsed span of the previous week, not the full week.
  */
 export interface WeeklyActivityPoint {
   /** ISO day key of the week's Monday, e.g. "2026-11-09". */
@@ -65,6 +66,8 @@ export interface WeeklyActivityPoint {
   ratedCount: number;
   avgDifficulty: number | null;
   isCurrent: boolean;
+  /** True while the week's Sunday has not been reached yet. */
+  inProgress: boolean;
 }
 
 /** A point of the cumulative unique-solved curve. */

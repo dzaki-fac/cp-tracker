@@ -156,6 +156,25 @@ describe("buildWeeklyActivity (Monday-start buckets)", () => {
     expect(weeks.map((w) => w.count)).toEqual([0, 1, 2]);
     expect(weeks[2].isCurrent).toBe(true);
     expect(weeks[1].isCurrent).toBe(false);
+    // Saturday: the current week has not reached its Sunday yet.
+    expect(weeks[2].inProgress).toBe(true);
+    expect(weeks[1].inProgress).toBe(false);
+    expect(weeks[0].inProgress).toBe(false);
+  });
+
+  it("marks the current week complete once its Sunday is reached", () => {
+    // "Now": 2025-11-16 (a Sunday) — still the Mon 11-10 week, but complete.
+    const now = Date.UTC(2025, 10, 16, 3, 0); // 10:00 Jakarta
+    const weeks = buildWeeklyActivity(
+      [solved("A", at10Utc("2025-11-11"))],
+      2,
+      now,
+    );
+
+    const current = weeks[1];
+    expect(current.isCurrent).toBe(true);
+    expect(current.inProgress).toBe(false);
+    expect(weeks[0].inProgress).toBe(false);
   });
 
   it("tracks the rated-only average difficulty per week", () => {
