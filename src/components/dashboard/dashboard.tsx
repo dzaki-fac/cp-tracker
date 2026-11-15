@@ -18,7 +18,7 @@ import { RecentOverview } from "@/components/dashboard/recent-overview";
  *
  *   1. Profile header (compact)      6. Difficulty progress
  *   2. Recent activity overview      7. Topic breakdown
- *   3. 30-day activity calendar      8. Recent solved problems
+ *   3. Monthly activity calendar     8. Recent solved problems
  *   4. Weekly performance            9. All-time statistics
  *   5. Problem solving progress     10. Rating progression
  *
