@@ -114,7 +114,10 @@ export function RatingTrendCard({ history }: { history: RatingHistoryPoint[] }) 
         <CardDescription>Rated contests over time</CardDescription>
       </CardHeader>
 
-      <div className="min-h-[168px] w-full flex-1">
+      {/* Explicit height: percentage-height ResponsiveContainer needs a
+          definite parent height (flex-1/min-h collapses to 0 in auto-height
+          cards, which blanked the chart). */}
+      <div className="h-52 w-full">
         {data.length < 2 ? (
           <div className="flex h-full items-center justify-center text-[14px] text-steel">
             {data.length === 0
