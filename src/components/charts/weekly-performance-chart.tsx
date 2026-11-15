@@ -85,7 +85,6 @@ function shortWeekLabel(dayKey: string): string {
 
 interface WeeklyPerformanceChartProps {
   weeks: WeeklyActivityPoint[];
-  currentStreakDays: number;
   /** Last week's count over the same elapsed span (fair baseline). */
   lastWeekSameElapsed: number;
 }
@@ -98,7 +97,6 @@ interface WeeklyPerformanceChartProps {
  */
 export function WeeklyPerformanceChart({
   weeks,
-  currentStreakDays,
   lastWeekSameElapsed,
 }: WeeklyPerformanceChartProps) {
   const data = useMemo<WeekPoint[]>(
@@ -134,16 +132,19 @@ export function WeeklyPerformanceChart({
         <CardDescription>Unique problems first solved per week</CardDescription>
       </CardHeader>
 
-      {/* Explicit height: percentage-height ResponsiveContainer needs a
-          definite parent height (min-h-0 flex-1 collapses to 0 inside an
-          auto-height card). */}
-      <div className="h-56 w-full py-1">
+      {/* The chart grows to fill the card's leftover height (the card
+          stretches to match the calendar in the same grid row). The chart
+          itself lives in an absolutely-positioned layer: its pixel size is
+          definite, so ResponsiveContainer's height:100% measures non-zero —
+          plain flex-1/min-h wrappers collapse it to 0. */}
+      <div className="relative min-h-40 w-full flex-1">
         {data.every((point) => point.count === 0) ? (
-          <div className="flex h-full min-h-40 items-center justify-center rounded-[10px] text-[14px] text-steel">
+          <div className="flex h-full items-center justify-center rounded-[10px] text-[14px] text-steel">
             No weekly activity yet.
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
+          <div className="absolute inset-0 py-1">
+            <ResponsiveContainer width="100%" height="100%">
             <BarChart
               data={data}
               margin={{ top: 16, right: 4, bottom: 0, left: -26 }}
@@ -185,12 +186,13 @@ export function WeeklyPerformanceChart({
                 <LabelList dataKey="count" content={<CountLabel />} />
               </Bar>
             </BarChart>
-          </ResponsiveContainer>
+            </ResponsiveContainer>
+          </div>
         )}
       </div>
 
       {/* Compact week-over-week summary */}
-      <div className="grid grid-cols-3 gap-3 border-t border-hairline-silver pt-4">
+      <div className="mt-auto grid grid-cols-3 gap-3 border-t border-hairline-silver pt-4">
         <div className="flex flex-col gap-0.5">
           <span className="text-[11px] leading-4 text-steel">This week</span>
           <span className="numeric text-[15px] leading-[1.2] font-semibold text-ink">
@@ -233,12 +235,6 @@ export function WeeklyPerformanceChart({
           </span>
         </div>
       </div>
-
-      <p className="text-[12px] leading-4 text-steel">
-        {inProgress
-          ? `The blue bar is the current week (still in progress) — streak: ${formatNumber(currentStreakDays)} day${currentStreakDays === 1 ? "" : "s"}`
-          : `Current streak: ${formatNumber(currentStreakDays)} day${currentStreakDays === 1 ? "" : "s"}`}
-      </p>
     </Card>
   );
 }
